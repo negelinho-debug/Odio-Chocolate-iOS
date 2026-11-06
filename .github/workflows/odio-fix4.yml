@@ -1,0 +1,94 @@
+
+name: Odio FIX 4 - iOS Version Repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-ios:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Fix iOS version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path(
+              "ProjectSettings/ProjectSettings.asset"
+          )
+
+          if not path.exists():
+              raise SystemExit(
+                  "ProjectSettings.asset not found!"
+              )
+
+          code = path.read_text(
+              encoding="utf-8-sig"
+          )
+
+          pattern = r"(?m)^(\s*bundleVersion:\s*).*$"
+
+          code, count = re.subn(
+              pattern,
+              lambda m: m.group(1) + "1.0.0",
+              code,
+              count=1
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "bundleVersion not found!"
+              )
+
+          path.write_text(
+              code, encoding="utf-8"
+          )
+
+          print("FIX 4 SUCCESS!")
+          print("iOS version: 1.0.0")
+          PY
+
+      - name: Save changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ProjectSettings/ProjectSettings.asset
+
+          if git diff --cached --quiet; then
+            echo "No changes needed"
+          else
+            git commit -m "FIX 4 - Repair iOS version"
+            git push origin HEAD:"$GITHUB_REF_NAME"
+          fi
+
+      - name: Verify FIX 4
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          code = Path(
+              "ProjectSettings/ProjectSettings.asset"
+          ).read_text()
+
+          match = re.search(
+              r"(?m)^\s*bundleVersion:\s*(.+)$",
+              code
+          )
+
+          assert match is not None
+          assert match.group(1).strip() == "1.0.0"
+
+          print("iOS VERSION FIXED!")
+          print("Ready for Unity Cloud test!")
+          PY
