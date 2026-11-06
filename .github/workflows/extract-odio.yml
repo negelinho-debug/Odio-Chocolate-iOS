@@ -1,0 +1,146 @@
+
+name: Odio - Two AssetRipper Exports
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input game logs
+          gh release download apk-source \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.apk' \
+            --dir input
+
+          APK=$(find input -name '*.apk' -print -quit)
+          test -n "$APK"
+
+          unzip -q "$APK" -d game
+
+          test -f game/assets/bin/Data/data.unity3d
+
+          test -f game/assets/bin/Data/Managed/Metadata/global-metadata.dat
+
+      - name: Install AssetRipper 2.0.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ripper-download ripper
+
+          gh release download 2.0.0 \
+            --repo AssetRipper/AssetRipper \
+            --pattern 'AssetRipper_linux_x64.tar.xz' \
+            --dir ripper-download
+
+          tar -xJf \
+            ripper-download/AssetRipper_linux_x64.tar.xz \
+            -C ripper
+
+          EXE=$(find "$PWD/ripper" -type f \
+            -name 'AssetRipper.GUI.Free' \
+            -print -quit)
+
+          test -n "$EXE"
+          chmod +x "$EXE"
+
+          echo "RIPPER_EXE=$EXE" >> "$GITHUB_ENV"
+
+      - name: Start AssetRipper
+        run: |
+          "$RIPPER_EXE" --headless --port 8888 \
+            > logs/assetripper.log 2>&1 &
+
+          for i in $(seq 1 90); do
+            if curl -fsS \
+              http://127.0.0.1:8888/ \
+              -o /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS \
+            http://127.0.0.1:8888/ \
+            -o /dev/null
+
+      - name: Load Unity game
+        run: |
+          curl -fsS --max-time 1200 \
+            --data-urlencode "Path=$PWD/game" \
+            http://127.0.0.1:8888/LoadFolder \
+            -o logs/load.html
+
+      - name: Export 1 - Unity Project
+        continue-on-error: true
+        run: |
+          mkdir -p exports/unity
+
+          curl -fsS --max-time 1200 \
+            --data-urlencode \
+            "Path=$PWD/exports/unity" \
+            http://127.0.0.1:8888/Export/UnityProject \
+            -o logs/unity.html
+
+          test -n "$(find exports/unity -type f -print -quit)"
+
+          du -sh exports/unity
+
+      - name: Export 2 - Primary Content
+        continue-on-error: true
+        run: |
+          mkdir -p exports/primary
+
+          curl -fsS --max-time 1200 \
+            --data-urlencode \
+            "Path=$PWD/exports/primary" \
+            http://127.0.0.1:8888/Export/PrimaryContent \
+            -o logs/primary.html
+
+          test -n "$(find exports/primary -type f -print -quit)"
+
+          du -sh exports/primary
+
+      - name: Upload Unity Project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-Unity-Project
+          path: exports/unity/
+          if-no-files-found: warn
+
+      - name: Upload Primary Content
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-Primary-Content
+          path: exports/primary/
+          if-no-files-found: warn
+
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-Logs
+          path: |
+            logs/
+            ripper/*.log
+          if-no-files-found: warn
+
+      - name: Check results
+        run: |
+          test -n "$(find exports/unity -type f -print -quit)"
+          test -n "$(find exports/primary -type f -print -quit)"
