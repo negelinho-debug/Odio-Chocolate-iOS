@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!241 &24100000
+AudioMixerController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Theme
+  m_OutputGroup: {fileID: 0}
+  m_MasterGroup: {fileID: 24300000}
+  m_Snapshots:
+  - {fileID: 24500004}
+  m_StartSnapshot: {fileID: 24500004}
+  m_SuspendThreshold: -80
+  m_EnableSuspend: 1
+  m_UpdateMode: 0
+  m_ExposedParameters: []
+  m_AudioMixerGroupViews:
+  - guids:
+    - b5e5bab2d24172d4294a8b6314821cba
+    name: View
+  m_CurrentViewIndex: 0
+  m_TargetSnapshot: {fileID: 24500004}
+--- !u!243 &24300000
+AudioMixerGroupController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Master
+  m_AudioMixer: {fileID: 24100000}
+  m_GroupID: b5e5bab2d24172d4294a8b6314821cba
+  m_Children: []
+  m_Volume: ee54a00fda6f03a42bfd43bb3a688995
+  m_Pitch: e5f56063a39f93f44b7f67c7fa82c943
+  m_Send: 8533eefd9d76e7a47ae506ee97d42eb1
+  m_Effects:
+  - {fileID: 24400002}
+  m_UserColorIndex: 0
+  m_Mute: 0
+  m_Solo: 0
+  m_BypassEffects: 0
+--- !u!244 &24400002
+AudioMixerEffectController:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name:
+  m_EffectID: 5e9c13741fd3fc14d9350119d574920e
+  m_EffectName: Attenuation
+  m_MixLevel: 00000000000000000000000000000000
+  m_Parameters: []
+  m_SendTarget: {fileID: 0}
+  m_EnableWetMix: 0
+  m_Bypass: 0
+--- !u!245 &24500004
+AudioMixerSnapshotController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Snapshot
+  m_AudioMixer: {fileID: 24100000}
+  m_SnapshotID: e7844e5bd0c348c4ab83bba41b8bca79
+  m_FloatValues:
+    ee54a00fda6f03a42bfd43bb3a688995: 5
+    e5f56063a39f93f44b7f67c7fa82c943: 1
+    8533eefd9d76e7a47ae506ee97d42eb1: -80
+  m_TransitionOverrides: {}
