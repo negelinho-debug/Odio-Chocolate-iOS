@@ -1,0 +1,85 @@
+
+name: Odio FIX 3 - Repair TextMeshPro
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Repair UI libraries
+        run: |
+          test -d Assets
+          test -f Packages/manifest.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          plugins = Path("Assets/Plugins")
+
+          for name in (
+              "Unity.TextMeshPro.dll",
+              "UnityEngine.UI.dll"
+          ):
+              dll = plugins / name
+              meta = Path(str(dll) + ".meta")
+
+              for file in (dll, meta):
+                  if file.exists():
+                      file.unlink()
+                      print("Removed:", file)
+
+          path = Path("Packages/manifest.json")
+          data = json.loads(path.read_text())
+
+          deps = data.setdefault(
+              "dependencies", {}
+          )
+
+          deps["com.unity.textmeshpro"] = "3.0.6"
+          deps["com.unity.ugui"] = "1.0.0"
+
+          path.write_text(
+              json.dumps(data, indent=2) + "\n"
+          )
+
+          print("Unity UI packages restored!")
+          PY
+
+      - name: Save FIX 3
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A Assets/Plugins Packages/manifest.json
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "FIX 3 - Repair Unity UI"
+            git push origin HEAD:main
+          fi
+
+      - name: Verify
+        run: |
+          python3 - <<'PY'
+          import json
+
+          with open("Packages/manifest.json") as f:
+              deps = json.load(f)["dependencies"]
+
+          assert deps["com.unity.textmeshpro"] == "3.0.6"
+          assert deps["com.unity.ugui"] == "1.0.0"
+
+          print("FIX 3 completed!")
+          PY
