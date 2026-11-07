@@ -10,7 +10,6 @@ public class Singleton<T> : MonoBehaviour where T : Component
 
 	public static bool Exist => false;
 
-	[RuntimeInitializeOnLoadMethod]
 	private static void Init()
 	{
 	}
