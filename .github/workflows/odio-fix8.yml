@@ -46,6 +46,7 @@ jobs:
                   b's\0\0\0' +
                   (namespace + name).encode('utf-8')
               )
+
               result = subprocess.run(
                   [
                       'openssl', 'dgst', '-md4',
@@ -55,6 +56,7 @@ jobs:
                   capture_output=True,
                   check=True
               )
+
               return struct.unpack(
                   '<i', result.stdout[:4]
               )[0]
@@ -166,7 +168,7 @@ jobs:
 
                   return (
                       'm_Script: {fileID: 11500000, '
-                      f'guid: {new_guid}, type: 3}}}'
+                      + 'guid: ' + new_guid + ', type: 3}'
                   )
 
               fixed = rx.sub(patch, text)
@@ -200,10 +202,24 @@ jobs:
           )[:20]:
               print('PATCHED', path, n)
 
+          report = (
+              f'Remapped {total} UI script references '
+              f'in {len(edits)} assets.\n'
+              + '\n'.join(
+                  f'Unmatched {key}: {n}'
+                  for key, n in unmatched.most_common()
+              )
+              + '\n'
+          )
+
+          Path('odio-fix8-report.txt').write_text(
+              report, encoding='utf-8'
+          )
+
           if total < 300:
               raise SystemExit(
                   'Too few mappings. '
-                  'No project files changed.'
+                  'Project files left unchanged.'
               )
 
           for file, (fixed, _) in edits.items():
@@ -211,16 +227,7 @@ jobs:
                   fixed, encoding='utf-8'
               )
 
-          Path('odio-fix8-report.txt').write_text(
-              f'Remapped {total} UI script references '
-              f'in {len(edits)} assets.\n'
-              + '\n'.join(
-                  f'Unmatched {key}: {n}'
-                  for key, n in unmatched.most_common()
-              )
-              + '\n',
-              encoding='utf-8'
-          )
+          print('FIX 8 mapping completed!')
           PY
 
       - name: Upload mapping report
