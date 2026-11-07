@@ -1,0 +1,121 @@
+
+name: Odio FIX 7 - Startup and Menu Logs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-startup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix startup and menu
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          singleton = Path(
+              "Assets/Scripts/Assembly-CSharp/Singleton.cs"
+          )
+          if not singleton.is_file():
+              raise SystemExit("Singleton.cs missing")
+
+          code = singleton.read_text(encoding="utf-8-sig")
+          if "class Singleton<T>" not in code:
+              raise SystemExit("Wrong Singleton script")
+
+          pattern = (
+              r"(?m)^[ \t]*\[RuntimeInitializeOnLoadMethod\]"
+              r"[ \t]*\r?\n"
+              r"(?=[ \t]*private static void Init\s*\(\s*\))"
+          )
+          code, count = re.subn(pattern, "", code, count=1)
+          if count != 1:
+              raise SystemExit("AOT attribute not found")
+
+          singleton.write_text(code, encoding="utf-8")
+          print("FIX 7A: AOT startup repaired")
+
+          warning = Path(
+              "Assets/Scripts/Assembly-CSharp/WarningScreenScript.cs"
+          )
+          if not warning.is_file():
+              raise SystemExit("Warning script missing")
+
+          old = warning.read_text(encoding="utf-8-sig")
+          if (
+              "class WarningScreenScript" not in old
+              or "public string LoadScene" not in old
+          ):
+              raise SystemExit("Unexpected warning script")
+
+          if not re.search(
+              r"private void Update\s*\(\s*\)\s*\{\s*\}",
+              old
+          ):
+              raise SystemExit("Warning script already changed")
+
+          warning.write_text("""using System;
+          using System.Collections;
+          using UnityEngine;
+          using UnityEngine.SceneManagement;
+
+          public class WarningScreenScript : MonoBehaviour
+          {
+              public string LoadScene;
+
+              private IEnumerator Start()
+              {
+                  Debug.Log("ODIO FIX7: Warning entered");
+                  yield return new WaitForSecondsRealtime(5f);
+
+                  string next = string.IsNullOrEmpty(LoadScene)
+                      ? "MainMenu" : LoadScene;
+
+                  if (!Application.CanStreamedLevelBeLoaded(next))
+                  {
+                      Debug.LogError(
+                          "ODIO FIX7: Scene unavailable: " + next
+                      );
+                      yield break;
+                  }
+
+                  Debug.Log("ODIO FIX7: Loading " + next);
+                  try
+                  {
+                      SceneManager.LoadScene(next);
+                  }
+                  catch (Exception ex)
+                  {
+                      Debug.LogError("ODIO FIX7: " + ex);
+                  }
+              }
+          }
+          """, encoding="utf-8")
+
+          print("FIX 7B: MainMenu transition repaired")
+          PY
+
+      - name: Commit FIX 7
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            Assets/Scripts/Assembly-CSharp/Singleton.cs \
+            Assets/Scripts/Assembly-CSharp/WarningScreenScript.cs
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "FIX 7: Repair startup and menu"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
