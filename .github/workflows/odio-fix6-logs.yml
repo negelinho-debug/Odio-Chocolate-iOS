@@ -1,0 +1,169 @@
+
+name: Odio FIX 6 - iPhone File Logs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  add-logs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add iPhone runtime logger
+        shell: bash
+        run: |
+          test -d Assets || exit 1
+          mkdir -p Assets/OdioDiagnostics
+
+          cat > Assets/OdioDiagnostics/OdioLaunchLogger.cs <<'CS'
+          using System;
+          using System.IO;
+          using UnityEngine;
+          using UnityEngine.SceneManagement;
+
+          public sealed class OdioLaunchLogger : MonoBehaviour
+          {
+              private static readonly object FileLock = new object();
+              private static string logPath;
+              private float nextHeartbeat;
+
+              [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+              private static void Install()
+              {
+                  try
+                  {
+                      Directory.CreateDirectory(Application.persistentDataPath);
+                      logPath = Path.Combine(Application.persistentDataPath, "odio-launch.log");
+                      File.WriteAllText(logPath,
+                          "=== Odio iOS launch ===\n" + DateTime.UtcNow.ToString("u") + " UTC\n" +
+                          "Unity: " + Application.unityVersion + "\n" +
+                          "Bundle: " + Application.identifier + "\n" +
+                          "Log file: " + logPath + "\n");
+                  }
+                  catch (Exception ex)
+                  {
+                      Debug.LogError("Odio logger setup failed: " + ex);
+                      return;
+                  }
+
+                  Application.logMessageReceivedThreaded += OnUnityLog;
+                  SceneManager.sceneLoaded += OnSceneLoaded;
+                  GameObject obj = new GameObject("__OdioLaunchLogger");
+                  DontDestroyOnLoad(obj);
+                  obj.AddComponent<OdioLaunchLogger>();
+                  Write("LOGGER STARTED");
+              }
+
+              private static void OnUnityLog(string message, string stackTrace, LogType type)
+              {
+                  Write("[" + type + "] " + message +
+                      (string.IsNullOrEmpty(stackTrace) ? "" : "\n" + stackTrace));
+              }
+
+              private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+              {
+                  Write("SCENE LOADED: " + scene.name + " (index " + scene.buildIndex + ")");
+                  try
+                  {
+                      GameObject[] roots = scene.GetRootGameObjects();
+                      Write("Root objects: " + roots.Length);
+                      int missing = 0;
+                      foreach (GameObject root in roots)
+                      {
+                          Write("  ROOT: " + root.name + " active=" + root.activeSelf);
+                          MonoBehaviour[] components = root.GetComponentsInChildren<MonoBehaviour>(true);
+                          foreach (MonoBehaviour component in components)
+                          {
+                              if (component == null) missing++;
+                          }
+                      }
+                      Write("Missing script components: " + missing);
+                  }
+                  catch (Exception ex)
+                  {
+                      Write("Scene inspection failed: " + ex);
+                  }
+              }
+
+              private void Update()
+              {
+                  if (Time.unscaledTime < nextHeartbeat) return;
+                  nextHeartbeat = Time.unscaledTime + 5f;
+                  Scene scene = SceneManager.GetActiveScene();
+                  Write("HEARTBEAT t=" + Time.unscaledTime.ToString("F1") +
+                      " activeScene=" + scene.name + " index=" + scene.buildIndex);
+              }
+
+              private static void Write(string line)
+              {
+                  if (string.IsNullOrEmpty(logPath)) return;
+                  lock (FileLock)
+                  {
+                      try
+                      {
+                          if (new FileInfo(logPath).Length > 2 * 1024 * 1024) return;
+                          File.AppendAllText(logPath,
+                              "[" + DateTime.UtcNow.ToString("HH:mm:ss.fff") + "] " + line + "\n");
+                      }
+                      catch
+                      {
+                          // Never crash the game because of logging.
+                      }
+                  }
+              }
+          }
+          CS
+
+      - name: Expose log in iPhone Files app
+        shell: bash
+        run: |
+          mkdir -p Assets/Editor
+
+          cat > Assets/Editor/OdioFileSharingPostBuild.cs <<'CS'
+          #if UNITY_EDITOR && UNITY_IOS
+          using System.IO;
+          using UnityEditor;
+          using UnityEditor.Callbacks;
+          using UnityEditor.iOS.Xcode;
+          using UnityEngine;
+
+          public static class OdioFileSharingPostBuild
+          {
+              [PostProcessBuild(100)]
+              public static void EnableFiles(BuildTarget target, string buildPath)
+              {
+                  if (target != BuildTarget.iOS) return;
+
+                  string infoPath = Path.Combine(buildPath, "Info.plist");
+                  PlistDocument plist = new PlistDocument();
+                  plist.ReadFromFile(infoPath);
+                  plist.root.SetBoolean("UIFileSharingEnabled", true);
+                  plist.root.SetBoolean("LSSupportsOpeningDocumentsInPlace", true);
+                  plist.WriteToFile(infoPath);
+
+                  Debug.Log("Odio FIX 6: Files app sharing enabled");
+              }
+          }
+          #endif
+          CS
+
+      - name: Commit FIX 6 to selected branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add Assets/OdioDiagnostics/OdioLaunchLogger.cs Assets/Editor/OdioFileSharingPostBuild.cs
+
+          if git diff --cached --quiet; then
+            echo 'FIX 6 already present'
+          else
+            git commit -m 'FIX 6: Save iOS runtime log in Files app'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
