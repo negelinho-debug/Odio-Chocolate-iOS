@@ -1,0 +1,249 @@
+
+name: Odio FIX 8 - Restore UI script links
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Unity UI source metadata
+        run: |
+          git clone --depth 1 \
+            https://github.com/Unity-Technologies/uGUI.git \
+            /tmp/unity-ugui
+
+          git clone --depth 1 \
+            https://github.com/needle-mirror/com.unity.textmeshpro.git \
+            /tmp/unity-tmp
+
+      - name: Repair broken UI and TMP references
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from collections import Counter
+          import re
+          import struct
+          import subprocess
+
+          old_guids = {
+              'd3e719b59ab71ba3f6b398058c866280': 'Unity UI',
+              '67dfb1fdfb2b407222eda8e23ac8b724': 'TextMeshPro',
+          }
+
+          def dll_file_id(namespace, name):
+              payload = (
+                  b's\0\0\0' +
+                  (namespace + name).encode('utf-8')
+              )
+              result = subprocess.run(
+                  [
+                      'openssl', 'dgst', '-md4',
+                      '-provider', 'legacy', '-binary'
+                  ],
+                  input=payload,
+                  capture_output=True,
+                  check=True
+              )
+              return struct.unpack(
+                  '<i', result.stdout[:4]
+              )[0]
+
+          mapping = {}
+
+          sources = [
+              (
+                  Path('/tmp/unity-ugui/com.unity.ugui/Runtime'),
+                  'd3e719b59ab71ba3f6b398058c866280'
+              ),
+              (
+                  Path('/tmp/unity-tmp/Scripts/Runtime'),
+                  '67dfb1fdfb2b407222eda8e23ac8b724'
+              ),
+          ]
+
+          for folder, old_guid in sources:
+              if not folder.is_dir():
+                  raise SystemExit(
+                      f'Missing source directory: {folder}'
+                  )
+
+              for cs in folder.rglob('*.cs'):
+                  meta = Path(str(cs) + '.meta')
+
+                  if not meta.is_file():
+                      continue
+
+                  code = cs.read_text(
+                      encoding='utf-8-sig',
+                      errors='replace'
+                  )
+
+                  ns_match = re.search(
+                      r'\bnamespace\s+([A-Za-z0-9_.]+)',
+                      code
+                  )
+
+                  guid_match = re.search(
+                      r'(?m)^guid:\s*([a-f0-9]{32})',
+                      meta.read_text(errors='replace')
+                  )
+
+                  if not ns_match or not guid_match:
+                      continue
+
+                  namespace = ns_match.group(1)
+                  name = cs.stem
+
+                  if not re.search(
+                      r'\b(class|struct)\s+' +
+                      re.escape(name) + r'\b',
+                      code
+                  ):
+                      continue
+
+                  mapping[
+                      (old_guid, dll_file_id(namespace, name))
+                  ] = guid_match.group(1)
+
+          assets = Path('Assets')
+
+          if not assets.is_dir():
+              raise SystemExit('Assets directory missing')
+
+          rx = re.compile(
+              r'm_Script: \{fileID: (-?\d+), '
+              r'guid: ([a-f0-9]{32}), type: 3\}'
+          )
+
+          edits = {}
+          unmatched = Counter()
+
+          for file in assets.rglob('*'):
+              if (
+                  not file.is_file()
+                  or file.suffix not in (
+                      '.unity', '.prefab', '.asset'
+                  )
+              ):
+                  continue
+
+              text = file.read_text(
+                  encoding='utf-8-sig',
+                  errors='replace'
+              )
+
+              count = [0]
+
+              def patch(match):
+                  old_id = int(match.group(1))
+                  old_guid = match.group(2)
+
+                  if old_guid not in old_guids:
+                      return match.group(0)
+
+                  new_guid = mapping.get(
+                      (old_guid, old_id)
+                  )
+
+                  if new_guid is None:
+                      unmatched[
+                          (old_guids[old_guid], old_id)
+                      ] += 1
+                      return match.group(0)
+
+                  count[0] += 1
+
+                  return (
+                      'm_Script: {fileID: 11500000, '
+                      f'guid: {new_guid}, type: 3}}}'
+                  )
+
+              fixed = rx.sub(patch, text)
+
+              if count[0]:
+                  edits[file] = (fixed, count[0])
+
+          total = sum(
+              n for _, n in edits.values()
+          )
+
+          print(
+              'UI script references remapped:',
+              total
+          )
+
+          print(
+              'Unmatched references:',
+              sum(unmatched.values())
+          )
+
+          for key, n in unmatched.most_common():
+              print(
+                  'UNMATCHED', key,
+                  'occurrences:', n
+              )
+
+          for path, (_, n) in sorted(
+              edits.items(),
+              key=lambda x: -x[1][1]
+          )[:20]:
+              print('PATCHED', path, n)
+
+          if total < 300:
+              raise SystemExit(
+                  'Too few mappings. '
+                  'No project files changed.'
+              )
+
+          for file, (fixed, _) in edits.items():
+              file.write_text(
+                  fixed, encoding='utf-8'
+              )
+
+          Path('odio-fix8-report.txt').write_text(
+              f'Remapped {total} UI script references '
+              f'in {len(edits)} assets.\n'
+              + '\n'.join(
+                  f'Unmatched {key}: {n}'
+                  for key, n in unmatched.most_common()
+              )
+              + '\n',
+              encoding='utf-8'
+          )
+          PY
+
+      - name: Upload mapping report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-FIX8-report
+          path: odio-fix8-report.txt
+          if-no-files-found: warn
+
+      - name: Commit FIX 8
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add Assets
+
+          if git diff --cached --quiet; then
+            echo 'No changes found'
+          else
+            git commit -m \
+              'FIX 8: Remap UI and TMP script references'
+
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
