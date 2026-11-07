@@ -1,0 +1,72 @@
+
+name: Odio FIX 5 - Test Old DLL Removal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-old-dlls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check references and remove old DLLs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          scripts = list(Path("Assets").rglob("*.cs"))
+          if not scripts:
+              raise SystemExit("No C# scripts found")
+
+          code = "\n".join(
+              p.read_text(
+                  encoding="utf-8-sig",
+                  errors="replace"
+              ) for p in scripts
+          )
+
+          if (
+              "UnityEngine.Networking" in code
+              or "System.Runtime.CompilerServices.Unsafe" in code
+          ):
+              raise SystemExit(
+                  "Old library is referenced; manual review needed"
+              )
+
+          names = [
+              "System.Runtime.CompilerServices.Unsafe.dll",
+              "com.unity.multiplayer-hlapi.Runtime.dll",
+          ]
+
+          for name in names:
+              dll = Path("Assets/Plugins") / name
+              for file in (
+                  dll,
+                  Path(str(dll) + ".meta")
+              ):
+                  if file.exists():
+                      file.unlink()
+                      print("Removed:", file)
+
+          print("FIX 5 test prepared!")
+          PY
+
+      - name: Commit test changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A Assets/Plugins
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "FIX 5 test old DLLs"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
