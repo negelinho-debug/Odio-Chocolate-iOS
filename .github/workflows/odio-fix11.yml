@@ -1,0 +1,91 @@
+
+name: Odio FIX 11 - Remove Black HUD Overlay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-overlay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Disable black fullscreen image
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('Assets/Scene/School.unity')
+          if not path.exists():
+              raise SystemExit('School.unity not found')
+
+          source = path.read_text(encoding='utf-8-sig')
+
+          # UIElements > Hud2 > Image
+          match = re.search(
+              r'(?ms)^--- !u!1 &4535\s*\n(.*?)(?=^--- !u!|\Z)',
+              source
+          )
+
+          if not match or 'm_Name: Image' not in match.group(1):
+              raise SystemExit('Expected HUD image not found')
+
+          block = match.group(1)
+
+          repaired, count = re.subn(
+              r'(?m)^  m_IsActive: 1$',
+              '  m_IsActive: 0',
+              block,
+              count=1
+          )
+
+          if count == 1:
+              source = (
+                  source[:match.start(1)]
+                  + repaired
+                  + source[match.end(1):]
+              )
+              path.write_text(source, encoding='utf-8')
+              print('Black HUD overlay disabled')
+          elif 'm_IsActive: 0' in block:
+              print('Black HUD overlay already disabled')
+          else:
+              raise SystemExit('Could not disable HUD image')
+
+          diagnostic = Path(
+              'Assets/OdioDiagnostics/OdioSchoolFix10.cs'
+          )
+
+          for file in (
+              diagnostic,
+              Path(str(diagnostic) + '.meta')
+          ):
+              if file.exists():
+                  file.unlink()
+                  print('Removed:', file)
+
+          print('FIX 11 prepared')
+          PY
+
+      - name: Commit FIX 11
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add -A \
+            Assets/Scene/School.unity \
+            Assets/OdioDiagnostics
+
+          if git diff --cached --quiet; then
+            echo 'No changes needed'
+          else
+            git commit -m \
+              'FIX 11: Remove opaque School HUD overlay'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
