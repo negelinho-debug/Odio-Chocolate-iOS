@@ -282,7 +282,11 @@ jobs:
                       'Mode missing: ' + selected
                   )
 
-          assert 'PlayerPrefs.SetString("CurrentMode", selected)' in button_code
+          assert re.search(
+              r'PlayerPrefs\.SetString\(\s*"CurrentMode"\s*,\s*selected\s*\)',
+              button_code
+          ), 'Mode persistence check failed'
+
           assert 'controller.CollectNotebook();' in proto_code
           assert 'notebooks++;' in gc_code
 
