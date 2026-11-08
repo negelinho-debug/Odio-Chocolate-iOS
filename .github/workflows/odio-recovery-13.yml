@@ -1,0 +1,391 @@
+
+name: Odio Recovery 13 - Modes and Chocolate Counter
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Restore game systems
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('Assets/Scripts/Assembly-CSharp')
+          marker = 'ODIO RECOVERY13'
+
+          def replace_method(path, signature, body,
+                             previous_marker=None,
+                             must_be_empty=False):
+              if not path.is_file():
+                  raise SystemExit('Missing: ' + str(path))
+
+              source = path.read_text(encoding='utf-8-sig')
+              found = re.search(
+                  r'(?m)^[ \t]*' +
+                  re.escape(signature) + r'\s*\{',
+                  source
+              )
+
+              if not found:
+                  raise SystemExit('Method missing: ' + signature)
+
+              opening = source.find('{', found.start())
+              level = 0
+              closing = -1
+
+              for i in range(opening, len(source)):
+                  if source[i] == '{':
+                      level += 1
+                  elif source[i] == '}':
+                      level -= 1
+                      if level == 0:
+                          closing = i
+                          break
+
+              if closing < 0:
+                  raise SystemExit('Unbalanced method')
+
+              old_body = source[opening + 1:closing]
+
+              if marker in old_body:
+                  print('Already patched:', signature)
+                  return
+
+              if must_be_empty and old_body.strip():
+                  raise SystemExit(
+                      'Nonempty method: ' + signature
+                  )
+
+              if previous_marker and previous_marker not in old_body:
+                  raise SystemExit(
+                      'Unexpected method: ' + signature
+                  )
+
+              changed = (
+                  source[:opening + 1]
+                  + '\n'
+                  + body.strip('\n')
+                  + '\n    '
+                  + source[closing:]
+              )
+
+              path.write_text(changed, encoding='utf-8')
+              print('Restored:', signature)
+
+          button = root / 'StartButton.cs'
+          source = button.read_text(encoding='utf-8-sig')
+
+          if 'using UnityEngine.SceneManagement;' not in source:
+              raise SystemExit('FIX9 missing')
+
+          replace_method(
+              button,
+              'public void StartGame()',
+              '''
+              // ODIO RECOVERY13
+              string selected;
+
+              switch (currentMode)
+              {
+                  case Mode.Ez:
+                      selected = "ez";
+                      break;
+                  case Mode.Duo:
+                      selected = "duo";
+                      break;
+                  case Mode.Duo2:
+                      selected = "duo2";
+                      break;
+                  case Mode.Endless:
+                      selected = "endless";
+                      break;
+                  default:
+                      selected = "story";
+                      break;
+              }
+
+              PlayerPrefs.SetString(
+                  "CurrentMode", selected
+              );
+
+              PlayerPrefs.Save();
+
+              Debug.Log(
+                  "ODIO RECOVERY13: Mode=" + selected
+              );
+
+              string sceneName =
+                  string.IsNullOrEmpty(LoadScene)
+                  ? "School" : LoadScene;
+
+              if (!Application.CanStreamedLevelBeLoaded(sceneName))
+              {
+                  Debug.LogError(
+                      "Scene missing: " + sceneName
+                  );
+                  return;
+              }
+
+              SceneManager.LoadScene(sceneName);
+              ''',
+              previous_marker='ODIO FIX9: StartGame pressed'
+          )
+
+          controller = root / 'GameControllerScript.cs'
+
+          replace_method(
+              controller,
+              'private void Start()',
+              '''
+              // ODIO RECOVERY13
+              mode = PlayerPrefs.GetString(
+                  "CurrentMode", "story"
+              );
+
+              if (string.IsNullOrEmpty(mode))
+                  mode = "story";
+
+              if (player == null)
+                  player = FindObjectOfType<PlayerScript>();
+
+              if (playerCamera == null)
+                  playerCamera = Camera.main;
+
+              if (baldiScrpt != null)
+                  baldiScrpt.endless =
+                      (mode == "endless");
+
+              if (modeText != null)
+              {
+                  switch (mode)
+                  {
+                      case "ez":
+                          modeText.text = "Ez Mode";
+                          break;
+                      case "duo":
+                          modeText.text = "Baltazar Mode";
+                          break;
+                      case "duo2":
+                          modeText.text = "Triple Mode";
+                          break;
+                      case "endless":
+                          modeText.text = "Endless Mode";
+                          break;
+                      default:
+                          modeText.text = "Normal Mode";
+                          break;
+                  }
+              }
+
+              UpdateNotebookCount();
+
+              Debug.Log(
+                  "ODIO RECOVERY13: School mode=" + mode
+              );
+              ''',
+              must_be_empty=True
+          )
+
+          replace_method(
+              controller,
+              'public void CollectNotebook()',
+              '''
+              // ODIO RECOVERY13
+              notebooks++;
+
+              UpdateNotebookCount();
+
+              Debug.Log(
+                  "ODIO RECOVERY13: Collected=" + notebooks
+              );
+              ''',
+              must_be_empty=True
+          )
+
+          replace_method(
+              controller,
+              'private void UpdateNotebookCount()',
+              '''
+              // ODIO RECOVERY13
+              if (notebookCount != null)
+              {
+                  notebookCount.text =
+                      mode == "endless"
+                      ? notebooks.ToString() + " chocolates"
+                      : notebooks.ToString() + "/13 chocolates";
+              }
+              ''',
+              must_be_empty=True
+          )
+
+          prototype = Path(
+              'Assets/OdioDiagnostics/OdioPlayableFix12.cs'
+          )
+
+          if not prototype.is_file():
+              raise SystemExit('FIX12 missing')
+
+          code = prototype.read_text(encoding='utf-8-sig')
+
+          if 'ODIO RECOVERY13: synchronized' not in code:
+              rx = (
+                  r'(collected\.Add\(\s*'
+                  r'nearest\.GetInstanceID\(\)\s*\);)'
+              )
+
+              replacement = (
+                  r'\1\n\n'
+                  '                      // ODIO RECOVERY13: synchronized notebook counter.\n'
+                  '                      GameControllerScript controller =\n'
+                  '                          FindObjectOfType<GameControllerScript>();\n'
+                  '                      if (controller != null) controller.CollectNotebook();'
+              )
+
+              code, count = re.subn(
+                  rx, replacement, code, count=1
+              )
+
+              if count != 1:
+                  raise SystemExit(
+                      'FIX12 collection site changed'
+                  )
+
+              prototype.write_text(
+                  code, encoding='utf-8'
+              )
+
+              print('Notebook counter linked')
+
+          button_code = button.read_text()
+          gc_code = controller.read_text()
+          proto_code = prototype.read_text()
+
+          for selected in (
+              'story', 'ez', 'duo', 'duo2', 'endless'
+          ):
+              if f'"{selected}"' not in button_code:
+                  raise SystemExit(
+                      'Mode missing: ' + selected
+                  )
+
+          assert 'PlayerPrefs.SetString("CurrentMode", selected)' in button_code
+          assert 'controller.CollectNotebook();' in proto_code
+          assert 'notebooks++;' in gc_code
+
+          print('STATIC CHECKS PASSED')
+          print('Unity compilation not tested')
+          PY
+
+      - name: Audit remaining empty methods
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('Assets/Scripts/Assembly-CSharp')
+          rows = []
+          total = 0
+
+          for file in root.rglob('*.cs'):
+              data = file.read_text(
+                  encoding='utf-8-sig',
+                  errors='replace'
+              )
+
+              empty = len(
+                  re.findall(
+                      r'\)\s*\{\s*\}', data
+                  )
+              )
+
+              null_returns = len(
+                  re.findall(
+                      r'\)\s*\{\s*return\s+null;\s*\}',
+                      data
+                  )
+              )
+
+              count = empty + null_returns
+
+              if count:
+                  rows.append((count, file.name))
+                  total += count
+
+          lines = [
+              'ODIO RECOVERY 13 REPORT',
+              '',
+              'Mode selection: patched',
+              'Mode persistence: patched',
+              'Chocolate counter: patched',
+              '',
+              'Remaining likely empty methods: '
+                  + str(total),
+              'Affected scripts: '
+                  + str(len(rows)),
+              '',
+              'Unity compilation not verified.',
+              'Original game logic remains incomplete.',
+              '',
+              'Top remaining scripts:'
+          ]
+
+          for count, name in sorted(
+              rows, reverse=True
+          )[:45]:
+              lines.append(
+                  str(count).rjust(3) + '  ' + name
+              )
+
+          Path(
+              'odio-recovery13-report.txt'
+          ).write_text(
+              '\n'.join(lines) + '\n',
+              encoding='utf-8'
+          )
+
+          print('\n'.join(lines))
+          PY
+
+      - name: Upload recovery report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-Recovery13-Audit
+          path: odio-recovery13-report.txt
+          if-no-files-found: error
+
+      - name: Commit restored code
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add \
+            Assets/Scripts/Assembly-CSharp/StartButton.cs \
+            Assets/Scripts/Assembly-CSharp/GameControllerScript.cs \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          git diff --cached --check
+
+          if ! git diff --cached --quiet; then
+            git commit -m \
+              'Recovery 13: modes and chocolate counter'
+            git push origin HEAD:main
+          fi
+
+          echo 'Recovery 13 completed'
