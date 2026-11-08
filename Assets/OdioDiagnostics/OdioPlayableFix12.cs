@@ -339,6 +339,11 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
                 nearest.GetInstanceID()
             );
 
+                      // ODIO RECOVERY13: synchronized notebook counter.
+                      GameControllerScript controller =
+                          FindObjectOfType<GameControllerScript>();
+                      if (controller != null) controller.CollectNotebook();
+
             nearest.gameObject.SetActive(false);
 
             ShowNotice(

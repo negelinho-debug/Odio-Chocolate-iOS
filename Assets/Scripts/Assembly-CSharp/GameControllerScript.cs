@@ -262,7 +262,53 @@ public class GameControllerScript : MonoBehaviour
 
 	private void Start()
 	{
-	}
+    // ODIO RECOVERY13
+    mode = PlayerPrefs.GetString(
+        "CurrentMode", "story"
+    );
+
+    if (string.IsNullOrEmpty(mode))
+        mode = "story";
+
+    if (player == null)
+        player = FindObjectOfType<PlayerScript>();
+
+    if (playerCamera == null)
+        playerCamera = Camera.main;
+
+    if (baldiScrpt != null)
+        baldiScrpt.endless =
+            (mode == "endless");
+
+    if (modeText != null)
+    {
+        switch (mode)
+        {
+            case "ez":
+                modeText.text = "Ez Mode";
+                break;
+            case "duo":
+                modeText.text = "Baltazar Mode";
+                break;
+            case "duo2":
+                modeText.text = "Triple Mode";
+                break;
+            case "endless":
+                modeText.text = "Endless Mode";
+                break;
+            default:
+                modeText.text = "Normal Mode";
+                break;
+        }
+    }
+
+    UpdateNotebookCount();
+
+    Debug.Log(
+        "ODIO RECOVERY13: School mode=" + mode
+    );
+
+    }
 
 	private void Update()
 	{
@@ -270,11 +316,29 @@ public class GameControllerScript : MonoBehaviour
 
 	private void UpdateNotebookCount()
 	{
-	}
+    // ODIO RECOVERY13
+    if (notebookCount != null)
+    {
+        notebookCount.text =
+            mode == "endless"
+            ? notebooks.ToString() + " chocolates"
+            : notebooks.ToString() + "/13 chocolates";
+    }
+
+    }
 
 	public void CollectNotebook()
 	{
-	}
+    // ODIO RECOVERY13
+    notebooks++;
+
+    UpdateNotebookCount();
+
+    Debug.Log(
+        "ODIO RECOVERY13: Collected=" + notebooks
+    );
+
+    }
 
 	public void LockMouse()
 	{

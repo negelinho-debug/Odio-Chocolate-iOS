@@ -18,31 +18,51 @@ public class StartButton : MonoBehaviour
 
 	public void StartGame()
 	{
+    // ODIO RECOVERY13
+    string selected;
 
-    string sceneName = string.IsNullOrEmpty(LoadScene)
+    switch (currentMode)
+    {
+        case Mode.Ez:
+            selected = "ez";
+            break;
+        case Mode.Duo:
+            selected = "duo";
+            break;
+        case Mode.Duo2:
+            selected = "duo2";
+            break;
+        case Mode.Endless:
+            selected = "endless";
+            break;
+        default:
+            selected = "story";
+            break;
+    }
+
+    PlayerPrefs.SetString(
+        "CurrentMode", selected
+    );
+
+    PlayerPrefs.Save();
+
+    Debug.Log(
+        "ODIO RECOVERY13: Mode=" + selected
+    );
+
+    string sceneName =
+        string.IsNullOrEmpty(LoadScene)
         ? "School" : LoadScene;
-
-    Debug.Log("ODIO FIX9: StartGame pressed. Mode="
-        + currentMode + "; Scene=" + sceneName);
 
     if (!Application.CanStreamedLevelBeLoaded(sceneName))
     {
         Debug.LogError(
-            "ODIO FIX9: Scene is missing from build: "
-            + sceneName);
+            "Scene missing: " + sceneName
+        );
         return;
     }
 
-    try
-    {
-        Debug.Log("ODIO FIX9: Loading school");
-        SceneManager.LoadScene(sceneName);
-    }
-    catch (System.Exception ex)
-    {
-        Debug.LogError(
-            "ODIO FIX9: Scene load failed: " + ex);
-    }
+    SceneManager.LoadScene(sceneName);
 
     }
 }
