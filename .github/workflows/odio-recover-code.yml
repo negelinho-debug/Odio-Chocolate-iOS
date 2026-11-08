@@ -1,0 +1,63 @@
+
+name: Odio - Recover IL2CPP code
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-code:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Download original APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input recovered logs
+
+          gh release download apk-source \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.apk' --dir input
+
+          APK=$(find "$PWD/input" \
+            -maxdepth 1 -name '*.apk' -print -quit)
+
+          test -n "$APK"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+      - name: Install Cpp2IL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tools
+
+          gh release download 2022.0.7 \
+            --repo SamboyCoding/Cpp2IL \
+            --pattern 'Cpp2IL-2022.0.7-Linux' \
+            --dir tools
+
+          chmod +x tools/Cpp2IL-2022.0.7-Linux
+
+      - name: Recover game logic
+        run: |
+          tools/Cpp2IL-2022.0.7-Linux \
+            --game-path="$APK" \
+            --run-analysis-for-assembly=Assembly-CSharp \
+            --analysis-level=4 \
+            --output-root="$PWD/recovered" \
+            > logs/cpp2il.log 2>&1
+
+      - name: Save recovery results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-IL2CPP-Recovery
+          path: |
+            recovered/
+            logs/
+          if-no-files-found: warn
+          retention-days: 7
