@@ -1,0 +1,740 @@
+
+name: Odio FIX 12 - One Chance Playable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  preflight-and-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Preflight before last Unity build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          required = [
+              'Assets/Scene/School.unity',
+              'Assets/Scripts/Assembly-CSharp/PlayerScript.cs',
+              'Assets/Scripts/Assembly-CSharp/StartButton.cs',
+              'Assets/Scripts/Assembly-CSharp/NotebookScript.cs',
+              'Assets/Scripts/Assembly-CSharp/PickupScript.cs',
+              'Assets/Scripts/Assembly-CSharp/DoorScript.cs',
+              'Assets/Scripts/Assembly-CSharp/BaldiScript.cs',
+              'Assets/Scripts/Assembly-CSharp/ExitTriggerScript.cs',
+              'Assets/OdioDiagnostics/OdioLaunchLogger.cs',
+              'ProjectSettings/EditorBuildSettings.asset',
+          ]
+
+          for item in required:
+              if not Path(item).is_file():
+                  raise SystemExit(
+                      'PRECHECK FAILED: Missing ' + item
+                  )
+
+          player = Path(
+              'Assets/Scripts/Assembly-CSharp/PlayerScript.cs'
+          ).read_text()
+
+          start = Path(
+              'Assets/Scripts/Assembly-CSharp/StartButton.cs'
+          ).read_text()
+
+          scenes = Path(
+              'ProjectSettings/EditorBuildSettings.asset'
+          ).read_text()
+
+          if (
+              'fixJoyFinger' not in player
+              or 'PlayerMove();' not in player
+          ):
+              raise SystemExit(
+                  'PRECHECK FAILED: FIX1 movement missing'
+              )
+
+          if 'ODIO FIX9: Loading school' not in start:
+              raise SystemExit(
+                  'PRECHECK FAILED: FIX9 missing'
+              )
+
+          if 'Assets/Scene/School.unity' not in scenes:
+              raise SystemExit(
+                  'School not present in build settings'
+              )
+
+          scene_path = Path('Assets/Scene/School.unity')
+          scene = scene_path.read_text(encoding='utf-8-sig')
+
+          meta = Path(
+              'Assets/Scripts/Assembly-CSharp/NotebookScript.cs.meta'
+          ).read_text()
+
+          guid = re.search(
+              r'(?m)^guid: ([a-f0-9]{32})$',
+              meta
+          )
+
+          if guid is None:
+              raise SystemExit('Notebook GUID missing')
+
+          refs = scene.count('guid: ' + guid.group(1))
+
+          if refs != 13:
+              raise SystemExit(
+                  'Expected 13 notebooks, found ' + str(refs)
+              )
+
+          match = re.search(
+              r'(?ms)^--- !u!1 &4535\s*\n(.*?)(?=^--- !u!|\Z)',
+              scene
+          )
+
+          if not match or 'm_Name: Image' not in match.group(1):
+              raise SystemExit('Black HUD image not found')
+
+          block = match.group(1)
+
+          if '  m_IsActive: 1' in block:
+              fixed = block.replace(
+                  '  m_IsActive: 1',
+                  '  m_IsActive: 0',
+                  1
+              )
+
+              scene = (
+                  scene[:match.start(1)]
+                  + fixed
+                  + scene[match.end(1):]
+              )
+
+              scene_path.write_text(
+                  scene,
+                  encoding='utf-8'
+              )
+
+              print('Black HUD overlay disabled')
+
+          elif '  m_IsActive: 0' in block:
+              print('Black overlay already disabled')
+
+          else:
+              raise SystemExit('Unexpected HUD image state')
+
+          diagnostic = Path(
+              'Assets/OdioDiagnostics/OdioSchoolFix10.cs'
+          )
+
+          for file in (
+              diagnostic,
+              Path(str(diagnostic) + '.meta')
+          ):
+              if file.exists():
+                  file.unlink()
+
+          print('PRECHECK PASSED!')
+          print('13 notebooks confirmed')
+          print('Movement and menu confirmed')
+          PY
+
+      - name: Install playable foundation
+        shell: bash
+        run: |
+          mkdir -p Assets/OdioDiagnostics
+
+          cat > Assets/OdioDiagnostics/OdioPlayableFix12.cs <<'CS'
+          using System;
+          using System.Collections;
+          using System.Collections.Generic;
+          using UnityEngine;
+          using UnityEngine.AI;
+          using UnityEngine.SceneManagement;
+
+          public sealed class OdioPlayableFix12 : MonoBehaviour
+          {
+              private const int Goal = 13;
+
+              private Transform player;
+              private Camera viewCamera;
+
+              private NotebookScript[] notebooks =
+                  new NotebookScript[0];
+
+              private PickupScript[] pickups =
+                  new PickupScript[0];
+
+              private DoorScript[] doors =
+                  new DoorScript[0];
+
+              private ExitTriggerScript[] exits =
+                  new ExitTriggerScript[0];
+
+              private readonly HashSet<int> collected =
+                  new HashSet<int>();
+
+              private readonly HashSet<int> takenItems =
+                  new HashSet<int>();
+
+              private NavMeshAgent baldiAgent;
+
+              private float nextChase;
+              private float nextLog;
+              private float schoolStarted;
+
+              private int inventoryCount;
+
+              private bool inSchool;
+              private bool gameOver;
+              private bool won;
+
+              private string notice = "";
+              private float noticeUntil;
+
+              [RuntimeInitializeOnLoadMethod(
+                  RuntimeInitializeLoadType.AfterSceneLoad)]
+              private static void Install()
+              {
+                  if (FindObjectOfType<OdioPlayableFix12>() != null)
+                      return;
+
+                  GameObject go = new GameObject(
+                      "ODIO Playable Foundation FIX12"
+                  );
+
+                  DontDestroyOnLoad(go);
+                  go.AddComponent<OdioPlayableFix12>();
+              }
+
+              private void Awake()
+              {
+                  SceneManager.sceneLoaded += OnSceneLoaded;
+
+                  if (SceneManager.GetActiveScene().name == "School")
+                      StartCoroutine(ConfigureSchool());
+              }
+
+              private void OnDestroy()
+              {
+                  SceneManager.sceneLoaded -= OnSceneLoaded;
+              }
+
+              private void OnSceneLoaded(
+                  Scene scene,
+                  LoadSceneMode mode)
+              {
+                  inSchool = false;
+
+                  if (scene.name == "School")
+                      StartCoroutine(ConfigureSchool());
+              }
+
+              private IEnumerator ConfigureSchool()
+              {
+                  yield return null;
+                  yield return new WaitForSecondsRealtime(0.4f);
+
+                  if (SceneManager.GetActiveScene().name != "School")
+                      yield break;
+
+                  GameObject playerObject =
+                      GameObject.Find("Player");
+
+                  player = playerObject == null
+                      ? null : playerObject.transform;
+
+                  viewCamera = Camera.main;
+
+                  if (viewCamera == null && player != null)
+                      viewCamera =
+                          player.GetComponentInChildren<Camera>(true);
+
+                  notebooks =
+                      FindObjectsOfType<NotebookScript>(true);
+
+                  pickups =
+                      FindObjectsOfType<PickupScript>(true);
+
+                  doors =
+                      FindObjectsOfType<DoorScript>(true);
+
+                  exits =
+                      FindObjectsOfType<ExitTriggerScript>(true);
+
+                  collected.Clear();
+                  takenItems.Clear();
+
+                  inventoryCount = 0;
+                  won = false;
+                  gameOver = false;
+
+                  schoolStarted = Time.unscaledTime;
+                  nextChase = 0f;
+                  nextLog = 0f;
+
+                  baldiAgent = null;
+
+                  BaldiScript[] enemies =
+                      FindObjectsOfType<BaldiScript>(true);
+
+                  foreach (BaldiScript enemy in enemies)
+                  {
+                      if (
+                          enemy == null ||
+                          enemy.gameObject.name != "Baldi"
+                      )
+                          continue;
+
+                      baldiAgent =
+                          enemy.GetComponent<NavMeshAgent>();
+
+                      break;
+                  }
+
+                  inSchool = true;
+
+                  Debug.Log(
+                      "ODIO FIX12: Started! player=" +
+                      (player == null ? "MISSING" : "ok") +
+                      " camera=" +
+                      (viewCamera == null ? "MISSING" : "ok") +
+                      " notebooks=" + notebooks.Length +
+                      " pickups=" + pickups.Length +
+                      " doors=" + doors.Length +
+                      " exits=" + exits.Length
+                  );
+
+                  ShowNotice(
+                      "Explore the school! Collect 13 notebooks."
+                  );
+              }
+
+              private void Update()
+              {
+                  if (!inSchool || player == null || gameOver)
+                      return;
+
+                  if (
+                      Input.GetKeyDown(KeyCode.E) ||
+                      Input.GetKeyDown(KeyCode.F)
+                  )
+                      Interact();
+
+                  if (Time.unscaledTime > nextLog)
+                  {
+                      nextLog = Time.unscaledTime + 12f;
+
+                      Debug.Log(
+                          "ODIO FIX12: Player=" + player.position +
+                          " collected=" + collected.Count +
+                          "/" + Goal +
+                          " inventory=" + inventoryCount
+                      );
+                  }
+
+                  if (
+                      baldiAgent != null &&
+                      baldiAgent.enabled &&
+                      baldiAgent.gameObject.activeInHierarchy &&
+                      baldiAgent.isOnNavMesh &&
+                      Time.unscaledTime - schoolStarted > 30f
+                  )
+                  {
+                      if (Time.unscaledTime > nextChase)
+                      {
+                          nextChase = Time.unscaledTime + 1f;
+                          baldiAgent.speed = 3.2f;
+
+                          baldiAgent.SetDestination(
+                              player.position
+                          );
+                      }
+
+                      if (
+                          Vector3.Distance(
+                              baldiAgent.transform.position,
+                              player.position
+                          ) < 1.6f
+                      )
+                      {
+                          gameOver = true;
+                          ShowNotice("Baldi caught you!");
+
+                          Debug.Log(
+                              "ODIO FIX12: Player caught"
+                          );
+                      }
+                  }
+              }
+
+              private void ShowNotice(string message)
+              {
+                  notice = message;
+                  noticeUntil = Time.unscaledTime + 4f;
+
+                  Debug.Log("ODIO FIX12: " + message);
+              }
+
+              private void Interact()
+              {
+                  if (player == null || gameOver)
+                      return;
+
+                  float minDistance = 3.1f;
+                  int kind = 0;
+
+                  MonoBehaviour nearest = null;
+
+                  foreach (NotebookScript n in notebooks)
+                  {
+                      if (
+                          n == null ||
+                          !n.gameObject.activeInHierarchy ||
+                          collected.Contains(n.GetInstanceID())
+                      )
+                          continue;
+
+                      float d = Vector3.Distance(
+                          player.position,
+                          n.transform.position
+                      );
+
+                      if (d < minDistance)
+                      {
+                          minDistance = d;
+                          nearest = n;
+                          kind = 1;
+                      }
+                  }
+
+                  foreach (PickupScript p in pickups)
+                  {
+                      if (
+                          p == null ||
+                          !p.gameObject.activeInHierarchy ||
+                          takenItems.Contains(p.GetInstanceID())
+                      )
+                          continue;
+
+                      float d = Vector3.Distance(
+                          player.position,
+                          p.transform.position
+                      );
+
+                      if (d < minDistance)
+                      {
+                          minDistance = d;
+                          nearest = p;
+                          kind = 2;
+                      }
+                  }
+
+                  foreach (DoorScript d in doors)
+                  {
+                      if (
+                          d == null ||
+                          !d.gameObject.activeInHierarchy
+                      )
+                          continue;
+
+                      float distance = Vector3.Distance(
+                          player.position,
+                          d.transform.position
+                      );
+
+                      if (distance < minDistance)
+                      {
+                          minDistance = distance;
+                          nearest = d;
+                          kind = 3;
+                      }
+                  }
+
+                  foreach (ExitTriggerScript x in exits)
+                  {
+                      if (
+                          x == null ||
+                          !x.gameObject.activeInHierarchy
+                      )
+                          continue;
+
+                      float distance = Vector3.Distance(
+                          player.position,
+                          x.transform.position
+                      );
+
+                      if (distance < minDistance)
+                      {
+                          minDistance = distance;
+                          nearest = x;
+                          kind = 4;
+                      }
+                  }
+
+                  if (nearest == null)
+                  {
+                      ShowNotice(
+                          "Nothing close enough to interact with"
+                      );
+                      return;
+                  }
+
+                  if (kind == 1)
+                  {
+                      collected.Add(
+                          nearest.GetInstanceID()
+                      );
+
+                      nearest.gameObject.SetActive(false);
+
+                      ShowNotice(
+                          "Collected: " +
+                          collected.Count + "/" + Goal
+                      );
+
+                      if (collected.Count >= Goal)
+                          ShowNotice(
+                              "All 13 collected! Find an exit!"
+                          );
+                  }
+                  else if (kind == 2)
+                  {
+                      if (inventoryCount >= 3)
+                      {
+                          ShowNotice(
+                              "Inventory full (3 items)"
+                          );
+                          return;
+                      }
+
+                      takenItems.Add(
+                          nearest.GetInstanceID()
+                      );
+
+                      nearest.gameObject.SetActive(false);
+                      inventoryCount++;
+
+                      ShowNotice(
+                          "Item collected (" +
+                          inventoryCount + "/3)"
+                      );
+                  }
+                  else if (kind == 3)
+                  {
+                      StartCoroutine(
+                          OpenDoorTemporarily(
+                              (DoorScript)nearest
+                          )
+                      );
+                  }
+                  else if (kind == 4)
+                  {
+                      if (collected.Count < Goal)
+                      {
+                          ShowNotice(
+                              "Need all 13 notebooks to escape!"
+                          );
+                      }
+                      else
+                      {
+                          won = true;
+                          gameOver = true;
+
+                          Debug.Log(
+                              "ODIO FIX12: Prototype level completed"
+                          );
+                      }
+                  }
+              }
+
+              private IEnumerator OpenDoorTemporarily(
+                  DoorScript door)
+              {
+                  if (door == null)
+                      yield break;
+
+                  MeshCollider barrier = door.barrier;
+
+                  if (barrier == null)
+                  {
+                      ShowNotice(
+                          "Door has no linked barrier"
+                      );
+                      yield break;
+                  }
+
+                  barrier.enabled = false;
+                  ShowNotice("Door opened");
+
+                  yield return new WaitForSeconds(7f);
+
+                  if (barrier != null)
+                      barrier.enabled = true;
+              }
+
+              private void OnGUI()
+              {
+                  if (!inSchool)
+                      return;
+
+                  float h = Screen.height;
+                  float w = Screen.width;
+
+                  float size = Mathf.Clamp(
+                      h * 0.055f,
+                      16f,
+                      27f
+                  );
+
+                  GUI.skin.label.fontSize = (int)size;
+                  GUI.skin.button.fontSize = (int)size;
+
+                  GUI.Box(
+                      new Rect(
+                          10f,
+                          10f,
+                          Mathf.Min(w * 0.47f, 400f),
+                          82f
+                      ),
+                      "ODIO: " + collected.Count +
+                      "/" + Goal +
+                      " | Items: " + inventoryCount + "/3"
+                  );
+
+                  if (Time.unscaledTime < noticeUntil)
+                  {
+                      GUI.Label(
+                          new Rect(
+                              12f,
+                              98f,
+                              Mathf.Min(w * 0.85f, 710f),
+                              75f
+                          ),
+                          notice
+                      );
+                  }
+
+                  if (gameOver)
+                  {
+                      GUI.Box(
+                          new Rect(
+                              w * 0.3f,
+                              h * 0.3f,
+                              w * 0.4f,
+                              h * 0.37f
+                          ),
+                          won
+                              ? "YOU ESCAPED!"
+                              : "BALDI CAUGHT YOU"
+                      );
+
+                      if (
+                          GUI.Button(
+                              new Rect(
+                                  w * 0.36f,
+                                  h * 0.48f,
+                                  w * 0.28f,
+                                  h * 0.1f
+                              ),
+                              "RETRY"
+                          )
+                      )
+                          SceneManager.LoadScene("School");
+
+                      return;
+                  }
+
+                  float buttonSize = Mathf.Clamp(
+                      h * 0.17f,
+                      85f,
+                      155f
+                  );
+
+                  float runAreaWidth = 135f;
+
+                  if (
+                      GUI.Button(
+                          new Rect(
+                              w - buttonSize - runAreaWidth,
+                              h - buttonSize - 13f,
+                              buttonSize,
+                              buttonSize
+                          ),
+                          "USE"
+                      )
+                  )
+                      Interact();
+              }
+          }
+          CS
+
+          test -s Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          grep -q 'Goal = 13' \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          echo 'FIX12 source prepared'
+
+      - name: Create review report
+        shell: bash
+        run: |
+          cat > odio-fix12-report.txt <<'EOF'
+          FIX 12 PRE-FLIGHT PREPARED
+
+          13 notebook references verified.
+          Existing movement and START button verified.
+          Black HUD layer disabled.
+          Temporary FIX10 camera diagnostics removed.
+
+          Added basic prototype interactions:
+          - 13 notebook collection
+          - Item pickups
+          - Temporary door opening
+          - Exit completion
+          - Optional Baldi NavMesh chase
+          - iPhone USE button
+          - Runtime logging
+
+          Original IL2CPP mechanics are not fully restored.
+          Unity compilation and gameplay remain unverified.
+          EOF
+
+          cat odio-fix12-report.txt
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-FIX12-preflight-report
+          path: odio-fix12-report.txt
+          if-no-files-found: warn
+
+      - name: Commit checked changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add -A \
+            Assets/Scene/School.unity \
+            Assets/OdioDiagnostics
+
+          if git diff --cached --quiet; then
+            echo 'Already prepared'
+          else
+            git commit -m \
+              'FIX12: Add limited playable foundation'
+
+            git push origin HEAD:main
+          fi
