@@ -1,0 +1,111 @@
+
+name: Odio FIX 9 - Start School
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-start:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Restore StartGame method
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path(
+              'Assets/Scripts/Assembly-CSharp/StartButton.cs'
+          )
+          scene = Path('Assets/Scene/School.unity')
+
+          if not path.is_file() or not scene.is_file():
+              raise SystemExit(
+                  'StartButton.cs or School.unity is missing'
+              )
+
+          code = path.read_text(encoding='utf-8-sig')
+
+          if 'using UnityEngine.SceneManagement;' not in code:
+              code = code.replace(
+                  'using UnityEngine;',
+                  'using UnityEngine;\n'
+                  'using UnityEngine.SceneManagement;',
+                  1
+              )
+
+          method = '''
+              string sceneName = string.IsNullOrEmpty(LoadScene)
+                  ? "School" : LoadScene;
+
+              Debug.Log("ODIO FIX9: StartGame pressed. Mode="
+                  + currentMode + "; Scene=" + sceneName);
+
+              if (!Application.CanStreamedLevelBeLoaded(sceneName))
+              {
+                  Debug.LogError(
+                      "ODIO FIX9: Scene is missing from build: "
+                      + sceneName);
+                  return;
+              }
+
+              try
+              {
+                  Debug.Log("ODIO FIX9: Loading school");
+                  SceneManager.LoadScene(sceneName);
+              }
+              catch (System.Exception ex)
+              {
+                  Debug.LogError(
+                      "ODIO FIX9: Scene load failed: " + ex);
+              }
+          '''
+
+          pattern = (
+              r'(public\s+void\s+StartGame'
+              r'\s*\(\s*\)\s*\{)\s*\}'
+          )
+
+          code, changes = re.subn(
+              pattern,
+              lambda m: m.group(1) + '\n'
+                  + method + '\n    }',
+              code,
+              count=1
+          )
+
+          if changes != 1:
+              if 'ODIO FIX9: StartGame pressed' not in code:
+                  raise SystemExit(
+                      'Unexpected StartGame method'
+                  )
+              print('FIX 9 already applied')
+          else:
+              path.write_text(
+                  code, encoding='utf-8'
+              )
+              print('FIX 9: School button patched')
+          PY
+
+      - name: Save FIX 9 to GitHub
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add Assets/Scripts/Assembly-CSharp/StartButton.cs
+
+          if git diff --cached --quiet; then
+            echo 'No new changes'
+          else
+            git commit -m \
+              'FIX 9: Restore StartGame school loading'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
