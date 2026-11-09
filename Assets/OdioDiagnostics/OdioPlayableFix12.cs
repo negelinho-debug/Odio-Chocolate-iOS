@@ -39,6 +39,20 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
 
     private int inventoryCount;
 
+    // ODIO RECOVERY16: quiz state
+    private NotebookScript quizNotebook;
+    private PlayerScript quizPlayer;
+    private bool quizPreviousCutscene;
+    private float quizPreviousTimeScale = 1f;
+    private int quizIndex;
+    private int quizWrong;
+    private int quizLeft;
+    private int quizRight;
+    private int quizOperation;
+    private int quizAnswer;
+    private int[] quizOptions = new int[3];
+
+
     private bool inSchool;
     private bool gameOver;
     private bool won;
@@ -78,6 +92,15 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         Scene scene,
         LoadSceneMode mode)
     {
+        if (quizNotebook != null)
+        {
+            Time.timeScale = quizPreviousTimeScale;
+            if (quizPlayer != null)
+                quizPlayer.cameraCutscene = quizPreviousCutscene;
+            quizNotebook = null;
+            quizPlayer = null;
+        }
+
         inSchool = false;
 
         if (scene.name == "School")
@@ -289,30 +312,7 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
                     return true;
                 }
 
-                if (collected.Add(notebook.GetInstanceID()))
-                {
-                    GameControllerScript gc =
-                        FindObjectOfType<GameControllerScript>();
-
-                    if (gc != null)
-                        gc.CollectNotebook();
-
-                    notebook.gameObject.SetActive(false);
-
-                    ShowNotice(
-                        "Chocolate " +
-                        collected.Count + "/" + Goal
-                    );
-
-                    if (collected.Count >= Goal)
-                        ShowNotice("All 13! Find an exit!");
-
-                    Debug.Log(
-                        "ODIO RECOVERY14: collected=" +
-                        notebook.name +
-                        " total=" + collected.Count
-                    );
-                }
+                BeginChocolateQuiz(notebook);
 
                 return true;
             }
@@ -322,6 +322,170 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         }
 
         return false;
+    }
+
+
+    // ODIO RECOVERY16: quiz - three mobile-friendly questions
+    private void BeginChocolateQuiz(NotebookScript notebook)
+    {
+        if (quizNotebook != null || notebook == null)
+            return;
+
+        quizNotebook = notebook;
+        quizIndex = 0;
+        quizWrong = 0;
+
+        quizPlayer = player == null ? null
+            : player.GetComponent<PlayerScript>();
+
+        if (quizPlayer != null)
+        {
+            quizPreviousCutscene = quizPlayer.cameraCutscene;
+            quizPlayer.cameraCutscene = true;
+        }
+
+        quizPreviousTimeScale = Time.timeScale;
+        Time.timeScale = 0f;
+
+        NewChocolateQuestion();
+        Debug.Log("ODIO RECOVERY16: quiz started");
+    }
+
+    private void NewChocolateQuestion()
+    {
+        quizLeft = UnityEngine.Random.Range(1, 10);
+        quizRight = UnityEngine.Random.Range(1, 10);
+        quizOperation = UnityEngine.Random.Range(0, 3);
+
+        if (quizOperation == 0)
+            quizAnswer = quizLeft + quizRight;
+        else if (quizOperation == 1)
+            quizAnswer = quizLeft - quizRight;
+        else
+            quizAnswer = quizLeft * quizRight;
+
+        quizOptions[0] = quizAnswer;
+        quizOptions[1] = quizAnswer +
+            UnityEngine.Random.Range(1, 5);
+        quizOptions[2] = quizAnswer -
+            UnityEngine.Random.Range(1, 5);
+
+        for (int i = 2; i > 0; i--)
+        {
+            int j = UnityEngine.Random.Range(0, i + 1);
+            int tmp = quizOptions[i];
+            quizOptions[i] = quizOptions[j];
+            quizOptions[j] = tmp;
+        }
+    }
+
+    private void AnswerChocolateQuestion(int answer)
+    {
+        if (quizNotebook == null)
+            return;
+
+        if (answer != quizAnswer)
+            quizWrong++;
+
+        quizIndex++;
+
+        if (quizIndex < 3)
+        {
+            NewChocolateQuestion();
+            return;
+        }
+
+        NotebookScript completed = quizNotebook;
+        quizNotebook = null;
+
+        Time.timeScale = quizPreviousTimeScale;
+
+        if (quizPlayer != null)
+            quizPlayer.cameraCutscene = quizPreviousCutscene;
+
+        quizPlayer = null;
+
+        if (completed == null ||
+            !collected.Add(completed.GetInstanceID()))
+            return;
+
+        GameControllerScript gc =
+            FindObjectOfType<GameControllerScript>();
+
+        if (gc != null)
+        {
+            gc.failedNotebooks += quizWrong;
+            gc.CollectNotebook();
+        }
+
+        if (recoveryBaldi != null && quizWrong > 0)
+            recoveryBaldi.GetAngry(quizWrong * 0.7f);
+
+        completed.gameObject.SetActive(false);
+
+        ShowNotice("Chocolate " + collected.Count +
+            "/" + Goal + " | Wrong: " + quizWrong);
+
+        Debug.Log("ODIO RECOVERY16: quiz finished; " +
+            "collected=" + collected.Count +
+            " wrong=" + quizWrong);
+
+        if (collected.Count >= Goal)
+            ShowNotice("All 13! Find an exit!");
+    }
+
+    private void DrawChocolateQuiz(float w, float h)
+    {
+        int font = (int)Mathf.Clamp(h * 0.064f, 17f, 30f);
+
+        GUI.skin.label.fontSize = font;
+        GUI.skin.button.fontSize = font;
+
+        float px = w * 0.1f;
+        float py = h * 0.08f;
+        float pw = w * 0.8f;
+        float ph = h * 0.84f;
+
+        GUI.Box(
+            new Rect(px, py, pw, ph),
+            "CHOCOLATE QUESTION " + (quizIndex + 1) + "/3"
+        );
+
+        string sign = quizOperation == 0 ? "+" :
+            (quizOperation == 1 ? "-" : "x");
+
+        GUI.Label(
+            new Rect(
+                px + 16f,
+                py + ph * 0.22f,
+                pw - 32f,
+                ph * 0.17f
+            ),
+            quizLeft + " " + sign + " " +
+            quizRight + " = ?"
+        );
+
+        for (int i = 0; i < 3; i++)
+        {
+            float bw = (pw - 48f) / 3f;
+
+            Rect r = new Rect(
+                px + 12f + i * (bw + 12f),
+                py + ph * 0.51f,
+                bw,
+                ph * 0.30f
+            );
+
+            if (GUI.Button(
+                r, quizOptions[i].ToString()
+            ))
+            {
+                AnswerChocolateQuestion(
+                    quizOptions[i]
+                );
+                break;
+            }
+        }
     }
 
     private void Interact()
@@ -487,6 +651,12 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
     {
         if (!inSchool)
             return;
+
+        if (quizNotebook != null)
+    {
+        DrawChocolateQuiz(Screen.width, Screen.height);
+        return;
+    }
 
         float h = Screen.height;
         float w = Screen.width;
