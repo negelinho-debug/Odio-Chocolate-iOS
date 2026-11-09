@@ -440,21 +440,8 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         }
         else if (kind == 4)
         {
-            if (collected.Count < Goal)
-            {
-                ShowNotice(
-                    "Need all 13 notebooks to escape!"
-                );
-            }
-            else
-            {
-                won = true;
-                gameOver = true;
-
-                Debug.Log(
-                    "ODIO FIX12: Prototype level completed"
-                );
-            }
+        // ODIO RECOVERY17 ORIGINAL: exit via scene trigger.
+        ShowNotice("Walk through the exit to finish!");
         }
     }
 

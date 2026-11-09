@@ -325,6 +325,11 @@ public class GameControllerScript : MonoBehaviour
             : notebooks.ToString() + "/13 chocolates";
     }
 
+
+    // ODIO RECOVERY17 ORIGINAL
+    if (!finaleMode && notebooks == 13 &&
+        mode != "endless")
+        ActivateFinaleMode();
     }
 
 	public void CollectNotebook()
@@ -366,7 +371,22 @@ public class GameControllerScript : MonoBehaviour
 
 	private void ActivateFinaleMode()
 	{
-	}
+        // ODIO RECOVERY17 ORIGINAL
+    if (finaleMode)
+        return;
+
+    finaleMode = true;
+
+    if (entrance_0 != null) entrance_0.Raise();
+    if (entrance_1 != null) entrance_1.Raise();
+    if (entrance_2 != null) entrance_2.Raise();
+    if (entrance_3 != null) entrance_3.Raise();
+
+    Debug.Log(
+        "ODIO RECOVERY17: Original final phase activated"
+    );
+
+    }
 
 	public void GetAngry(float value)
 	{
@@ -437,7 +457,44 @@ public class GameControllerScript : MonoBehaviour
 
 	public void ExitReached()
 	{
-	}
+        // ODIO RECOVERY17 ORIGINAL
+    exitsReached = Mathf.Min(exitsReached + 1, 3);
+
+    if (player == null)
+        player = FindObjectOfType<PlayerScript>();
+
+    if (player != null)
+    {
+        if (exitsReached == 1)
+        {
+            player.walkSpeed = 36f;
+            player.runSpeed = 41f;
+        }
+        else if (exitsReached == 2)
+        {
+            player.walkSpeed = 38f;
+            player.runSpeed = 43f;
+        }
+        else
+        {
+            player.walkSpeed = 40f;
+            player.runSpeed = 45f;
+        }
+    }
+
+    if (notebookCount != null)
+        notebookCount.text =
+            exitsReached == 1 ? "1 Exit Reached" :
+            exitsReached == 2 ? "Almost There" :
+            "GO TO THE LAST EXIT!";
+
+    if (audioDevice == null)
+        audioDevice = GetComponent<AudioSource>();
+
+    if (audioDevice != null && aud_Switch != null)
+        audioDevice.PlayOneShot(aud_Switch);
+
+    }
 
 	private IEnumerator ChangeAmbientColor(Color from, Color to, float duration)
 	{
