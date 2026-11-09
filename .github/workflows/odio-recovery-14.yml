@@ -1,0 +1,228 @@
+
+name: Odio Recovery 14 - Chocolate Interaction
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore-interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Patch chocolate interaction without Unity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('Assets/OdioDiagnostics/OdioPlayableFix12.cs')
+          scene = Path('Assets/Scene/School.unity')
+
+          if not path.is_file() or not scene.is_file():
+              raise SystemExit('Missing FIX12 script or School scene')
+
+          s = path.read_text(encoding='utf-8-sig')
+          scene_text = scene.read_text(
+              encoding='utf-8-sig', errors='replace'
+          )
+
+          notebook_count = scene_text.count(
+              'openingDistance: 10'
+          )
+
+          print('Chocolate objects:', notebook_count)
+
+          if notebook_count < 13:
+              raise SystemExit('Expected 13 chocolates')
+
+          if 'ODIO RECOVERY14' in s:
+              print('Recovery 14 already applied')
+              raise SystemExit(0)
+
+          if 'ODIO RECOVERY13: synchronized notebook counter.' not in s:
+              raise SystemExit('Recovery 13 missing')
+
+          method = '''
+              // ODIO RECOVERY14: camera-based collection
+              private bool TryCollectAimedChocolate()
+              {
+                  if (viewCamera == null)
+                      viewCamera = Camera.main;
+
+                  if (viewCamera == null || player == null)
+                      return false;
+
+                  Ray ray = viewCamera.ViewportPointToRay(
+                      new Vector3(0.5f, 0.5f, 0f));
+
+                  RaycastHit[] hits = Physics.RaycastAll(
+                      ray, 12f, ~0,
+                      QueryTriggerInteraction.Collide);
+
+                  Array.Sort(hits, (a, b) =>
+                      a.distance.CompareTo(b.distance));
+
+                  foreach (RaycastHit hit in hits)
+                  {
+                      Collider c = hit.collider;
+                      if (c == null) continue;
+
+                      if (c.transform.IsChildOf(player))
+                          continue;
+
+                      NotebookScript notebook =
+                          c.GetComponentInParent<NotebookScript>();
+
+                      if (notebook != null)
+                      {
+                          if (!notebook.gameObject.activeInHierarchy ||
+                              collected.Contains(notebook.GetInstanceID()))
+                              return false;
+
+                          float reach = notebook.openingDistance > 0f
+                              ? notebook.openingDistance : 10f;
+
+                          if (hit.distance > reach ||
+                              Vector3.Distance(
+                                  player.position,
+                                  notebook.transform.position
+                              ) > reach + 1.5f)
+                          {
+                              ShowNotice("Move closer to the chocolate");
+                              return true;
+                          }
+
+                          if (collected.Add(notebook.GetInstanceID()))
+                          {
+                              GameControllerScript gc =
+                                  FindObjectOfType<GameControllerScript>();
+
+                              if (gc != null)
+                                  gc.CollectNotebook();
+
+                              notebook.gameObject.SetActive(false);
+
+                              ShowNotice(
+                                  "Chocolate " +
+                                  collected.Count + "/" + Goal
+                              );
+
+                              if (collected.Count >= Goal)
+                                  ShowNotice("All 13! Find an exit!");
+
+                              Debug.Log(
+                                  "ODIO RECOVERY14: collected=" +
+                                  notebook.name +
+                                  " total=" + collected.Count
+                              );
+                          }
+
+                          return true;
+                      }
+
+                      if (!c.isTrigger)
+                          break;
+                  }
+
+                  return false;
+              }
+
+          '''
+
+          anchor = '    private void Interact()\n    {'
+
+          if s.count(anchor) != 1:
+              raise SystemExit('Interact method changed')
+
+          s = s.replace(anchor, method + anchor, 1)
+
+          check = (
+              r'(?m)^        if '
+              r'\(player == null \|\| gameOver\)'
+              r'\s*return;'
+          )
+
+          if len(re.findall(check, s)) != 1:
+              raise SystemExit('Player check changed')
+
+          s = re.sub(
+              check,
+              lambda m: m.group(0) +
+              '\n\n        if (TryCollectAimedChocolate()) return;',
+              s,
+              count=1
+          )
+
+          start = s.index(
+              '        foreach (NotebookScript n in notebooks)',
+              s.index('    private void Interact()')
+          )
+
+          end = s.index(
+              '        foreach (PickupScript p in pickups)',
+              start
+          )
+
+          s = s[:start] + s[end:]
+
+          start = s.index(
+              '        if (kind == 1)\n',
+              s.index('    private void Interact()')
+          )
+
+          end = s.index(
+              '        else if (kind == 2)\n',
+              start
+          )
+
+          s = (
+              s[:start]
+              + '        if (kind == 2)\n'
+              + s[end + len('        else if (kind == 2)\n'):]
+          )
+
+          assert s.count('ODIO RECOVERY14') == 2
+          assert 'Physics.RaycastAll(' in s
+          assert 'QueryTriggerInteraction.Collide' in s
+          assert s.count('gc.CollectNotebook()') == 1
+          assert 'if (TryCollectAimedChocolate()) return;' in s
+          assert 'if (kind == 1)' not in s
+          assert 'if (kind == 2)' in s
+          assert 'else if (kind == 3)' in s
+          assert 'else if (kind == 4)' in s
+
+          path.write_text(s, encoding='utf-8')
+
+          print('RECOVERY 14 STATIC CHECKS PASSED')
+          print('Unity compilation not tested')
+          PY
+
+      - name: Check and commit code
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          sed -i 's/[[:blank:]]*$//' \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          git add Assets/OdioDiagnostics/OdioPlayableFix12.cs
+          git diff --cached --check
+
+          if ! git diff --cached --quiet; then
+            git commit -m \
+              'Recovery 14: camera-aimed chocolate collection'
+            git push origin HEAD:main
+          fi
+
+          echo 'Recovery 14 completed'
