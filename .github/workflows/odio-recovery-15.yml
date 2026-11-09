@@ -1,0 +1,564 @@
+
+name: Odio Recovery 15 - Baldi AI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  baldi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Restore Baldi behavior
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('Assets/Scripts/Assembly-CSharp')
+          baldi = root / 'BaldiScript.cs'
+          selector = root / 'AILocationSelectorScript.cs'
+          foundation = Path(
+              'Assets/OdioDiagnostics/OdioPlayableFix12.cs'
+          )
+
+          for p in (baldi, selector, foundation):
+              if not p.is_file():
+                  raise SystemExit('Missing: ' + str(p))
+
+          def restore(path, signature, body):
+              s = path.read_text(encoding='utf-8-sig')
+              hit = re.search(
+                  r'(?m)^[ \t]*' + re.escape(signature)
+                  + r'\s*\{', s
+              )
+              if hit is None:
+                  raise SystemExit(
+                      'Missing method: ' + signature
+                  )
+
+              opening = s.index('{', hit.start())
+              depth = 0
+              closing = -1
+
+              for k in range(opening, len(s)):
+                  if s[k] == '{':
+                      depth += 1
+                  elif s[k] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          closing = k
+                          break
+
+              if closing < 0:
+                  raise SystemExit('Unbalanced braces')
+
+              current = s[opening+1:closing]
+
+              if 'ODIO RECOVERY15' in current:
+                  print('Already restored:', signature)
+                  return
+
+              if current.strip():
+                  raise SystemExit(
+                      'Refusing to overwrite: ' + signature
+                  )
+
+              changed = (
+                  s[:opening+1]
+                  + '\n    // ODIO RECOVERY15\n'
+                  + body.strip()
+                  + '\n    '
+                  + s[closing:]
+              )
+
+              path.write_text(
+                  changed, encoding='utf-8'
+              )
+              print('Restored:', signature)
+
+          restore(
+              selector,
+              'public void GetNewTarget()',
+              '''
+              if (newLocation == null ||
+                  newLocation.Length == 0) return;
+
+              for (int attempt = 0; attempt < 20; attempt++)
+              {
+                  int pick = Random.Range(
+                      0, newLocation.Length
+                  );
+
+                  if (newLocation[pick] == null)
+                      continue;
+
+                  id = pick;
+                  transform.position =
+                      newLocation[pick].position;
+                  return;
+              }
+              '''
+          )
+
+          restore(
+              baldi,
+              'private void Start()',
+              '''
+              agent = GetComponent<NavMeshAgent>();
+
+              baldiAudio = audioSource != null
+                  ? audioSource
+                  : GetComponent<AudioSource>();
+
+              if (player == null)
+              {
+                  GameObject p = GameObject.Find("Player");
+
+                  if (p != null)
+                      player = p.transform;
+              }
+
+              if (gameController == null)
+                  gameController =
+                      FindObjectOfType<GameControllerScript>();
+
+              if (baseSpeed <= 0f)
+                  baseSpeed = 2.5f;
+
+              headStartTimer = headStartDuration > 0f
+                  ? headStartDuration : 8f;
+
+              headStartActive = true;
+              currentSpeed = baseSpeed;
+
+              slapTimer = slapInterval > 0.1f
+                  ? slapInterval : 1f;
+
+              if (agent != null &&
+                  agent.enabled && agent.isOnNavMesh)
+              {
+                  agent.speed = currentSpeed;
+                  agent.isStopped = true;
+              }
+
+              Debug.Log(
+                  "ODIO RECOVERY15: Baldi activated, navmesh="
+                  + (agent != null &&
+                     agent.enabled && agent.isOnNavMesh)
+              );
+              '''
+          )
+
+          restore(
+              baldi,
+              'private void Update()',
+              '''
+              if (agent == null ||
+                  !agent.enabled ||
+                  !agent.isOnNavMesh) return;
+
+              if (player == null) return;
+
+              if (headStartActive)
+              {
+                  headStartTimer -= Time.deltaTime;
+
+                  if (headStartTimer > 0f)
+                      return;
+
+                  headStartActive = false;
+                  agent.isStopped = false;
+
+                  Debug.Log(
+                      "ODIO RECOVERY15: Baldi begins patrol"
+                  );
+              }
+
+              if (antiHearingTime > 0f)
+              {
+                  antiHearingTime -= Time.deltaTime;
+
+                  if (antiHearingTime <= 0f)
+                      antiHearing = false;
+              }
+
+              baldiTempAnger = Mathf.Max(
+                  0f, baldiTempAnger - Time.deltaTime
+              );
+
+              currentSpeed = Mathf.Clamp(
+                  baseSpeed +
+                  baldiAnger * 0.45f +
+                  baldiTempAnger * 0.3f,
+                  1.5f, 7f
+              );
+
+              agent.speed = currentSpeed;
+
+              coolDown = Mathf.Max(
+                  0f, coolDown - Time.deltaTime
+              );
+
+              slapTimer -= Time.deltaTime;
+
+              if (slapTimer <= 0f)
+              {
+                  slapTimer = slapInterval > 0.1f
+                      ? slapInterval : 1f;
+
+                  if (baldiAudio != null && slap != null)
+                      baldiAudio.PlayOneShot(slap);
+              }
+
+              if (coolDown <= 0f &&
+                  !agent.pathPending &&
+                  (!agent.hasPath ||
+                   agent.remainingDistance <=
+                   agent.stoppingDistance + 0.5f))
+              {
+                  currentPriority = 0f;
+                  Wander();
+              }
+              '''
+          )
+
+          restore(
+              baldi,
+              'private void FixedUpdate()',
+              '''
+              if (headStartActive ||
+                  player == null ||
+                  agent == null ||
+                  !agent.enabled ||
+                  !agent.isOnNavMesh ||
+                  coolDown > 0f) return;
+
+              Vector3 origin =
+                  transform.position + Vector3.up;
+
+              Vector3 goal =
+                  player.position + Vector3.up;
+
+              Vector3 delta = goal - origin;
+
+              if (delta.sqrMagnitude > 400f ||
+                  delta.sqrMagnitude < 0.01f) return;
+
+              RaycastHit[] hits = Physics.RaycastAll(
+                  origin,
+                  delta.normalized,
+                  delta.magnitude,
+                  ~0,
+                  QueryTriggerInteraction.Ignore
+              );
+
+              System.Array.Sort(
+                  hits,
+                  (a, b) => a.distance.CompareTo(b.distance)
+              );
+
+              foreach (RaycastHit hit in hits)
+              {
+                  if (hit.collider == null) continue;
+
+                  if (hit.collider.transform.IsChildOf(
+                      transform)) continue;
+
+                  if (!hit.collider.transform.IsChildOf(
+                      player)) return;
+
+                  break;
+              }
+
+              TargetPlayer();
+              '''
+          )
+
+          restore(
+              baldi,
+              'private void Wander()',
+              '''
+              if (agent == null ||
+                  !agent.enabled ||
+                  !agent.isOnNavMesh) return;
+
+              if (wanderer != null)
+                  wanderer.GetNewTarget();
+
+              Vector3 target;
+
+              if (wanderTarget != null)
+              {
+                  target = wanderTarget.position;
+              }
+              else
+              {
+                  NavMeshHit hit;
+
+                  if (!NavMesh.SamplePosition(
+                      transform.position +
+                      Random.insideUnitSphere * 12f,
+                      out hit,
+                      12f,
+                      NavMesh.AllAreas))
+                      return;
+
+                  target = hit.position;
+              }
+
+              agent.SetDestination(target);
+              coolDown = 0.8f;
+              '''
+          )
+
+          restore(
+              baldi,
+              'public void TargetPlayer()',
+              '''
+              if (agent == null ||
+                  !agent.enabled ||
+                  !agent.isOnNavMesh ||
+                  player == null ||
+                  headStartActive) return;
+
+              agent.SetDestination(player.position);
+              coolDown = 0.35f;
+              '''
+          )
+
+          restore(
+              baldi,
+              'public void GetAngry(float value)',
+              '''
+              baldiAnger = Mathf.Max(
+                  0f, baldiAnger + value
+              );
+              '''
+          )
+
+          restore(
+              baldi,
+              'public void GetTempAngry(float value)',
+              '''
+              baldiTempAnger = Mathf.Max(
+                  0f, baldiTempAnger + value
+              );
+              '''
+          )
+
+          restore(
+              baldi,
+              'public void Hear(Vector3 soundLocation, float priority)',
+              '''
+              if (antiHearing ||
+                  headStartActive ||
+                  priority < currentPriority ||
+                  agent == null ||
+                  !agent.enabled ||
+                  !agent.isOnNavMesh) return;
+
+              currentPriority = priority;
+              agent.SetDestination(soundLocation);
+              coolDown = 2.5f;
+              '''
+          )
+
+          restore(
+              baldi,
+              'public void ActivateAntiHearing(float t)',
+              '''
+              antiHearing = true;
+              antiHearingTime = Mathf.Max(0f, t);
+              currentPriority = 0f;
+              Wander();
+              '''
+          )
+
+          s = foundation.read_text(
+              encoding='utf-8-sig'
+          )
+
+          if 'ODIO RECOVERY15: activate inactive Baldi' not in s:
+              find = '    private NavMeshAgent baldiAgent;'
+
+              if s.count(find) != 1:
+                  raise SystemExit(
+                      'FIX12 Baldi field changed'
+                  )
+
+              s = s.replace(
+                  find,
+                  find + '\n    private BaldiScript recoveryBaldi;',
+                  1
+              )
+
+              find = '        baldiAgent = null;'
+
+              if s.count(find) != 1:
+                  raise SystemExit('FIX12 setup changed')
+
+              s = s.replace(
+                  find,
+                  find + '\n        recoveryBaldi = null;',
+                  1
+              )
+
+              match = re.search(
+                  r'(?m)^\s*baldiAgent\s*=\s*'
+                  r'enemy\.GetComponent<NavMeshAgent>\(\);',
+                  s
+              )
+
+              if match is None:
+                  raise SystemExit(
+                      'FIX12 enemy selection changed'
+                  )
+
+              s = (
+                  s[:match.end()]
+                  + '\n            recoveryBaldi = enemy;'
+                  + s[match.end():]
+              )
+
+              offset = s.index(
+                  '    private void Update()'
+              )
+
+              chase = re.search(
+                  r'(?m)^        if\s*\(\s*'
+                  r'baldiAgent != null &&',
+                  s[offset:]
+              )
+
+              if chase is None:
+                  raise SystemExit(
+                      'FIX12 chase block changed'
+                  )
+
+              start = offset + chase.start()
+
+              end = s.index(
+                  '\n    }\n\n    private void ShowNotice',
+                  start
+              )
+
+              replacement = '''
+              // ODIO RECOVERY15: activate inactive Baldi after first chocolate
+              if (recoveryBaldi != null &&
+                  collected.Count > 0 &&
+                  !recoveryBaldi.gameObject.activeSelf &&
+                  Time.unscaledTime - schoolStarted > 18f)
+              {
+                  recoveryBaldi.gameObject.SetActive(true);
+                  Debug.Log(
+                      "ODIO RECOVERY15: enabled Baldi"
+                  );
+              }
+
+              // FIX12 only handles defeat.
+              // BaldiScript handles movement.
+              if (baldiAgent != null &&
+                  baldiAgent.enabled &&
+                  baldiAgent.gameObject.activeInHierarchy &&
+                  baldiAgent.isOnNavMesh &&
+                  Time.unscaledTime - schoolStarted > 30f &&
+                  Vector3.Distance(
+                      baldiAgent.transform.position,
+                      player.position
+                  ) < 1.6f)
+              {
+                  gameOver = true;
+
+                  PlayerScript ps =
+                      player.GetComponent<PlayerScript>();
+
+                  if (ps != null)
+                      ps.gameOver = true;
+
+                  ShowNotice("Baldi caught you!");
+
+                  Debug.Log(
+                      "ODIO RECOVERY15: player caught"
+                  );
+              }
+              '''
+
+              s = (
+                  s[:start]
+                  + replacement
+                  + s[end:]
+              )
+
+              foundation.write_text(
+                  s, encoding='utf-8'
+              )
+
+              print(
+                  'Restored Baldi activation '
+                  'and removed FIX12 chase conflict'
+              )
+
+          else:
+              print('FIX12 already patched')
+
+          b = baldi.read_text()
+          f = foundation.read_text()
+
+          assert b.count('// ODIO RECOVERY15') == 9
+          assert 'Physics.RaycastAll(' in b
+
+          assert (
+              'agent.SetDestination(player.position)' in b
+          )
+
+          assert (
+              'recoveryBaldi.gameObject.SetActive(true)' in f
+          )
+
+          assert 'baldiAgent.SetDestination(' not in f
+
+          assert (
+              'if (TryCollectAimedChocolate()) return;' in f
+          )
+
+          assert 'else if (kind == 3)' in f
+
+          print('RECOVERY 15 STATIC CHECKS PASSED')
+          print('Unity compilation and gameplay NOT tested')
+          PY
+
+      - name: Commit without Unity Cloud
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          sed -i 's/[[:blank:]]*$//' \
+            Assets/Scripts/Assembly-CSharp/BaldiScript.cs \
+            Assets/Scripts/Assembly-CSharp/AILocationSelectorScript.cs \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          git add \
+            Assets/Scripts/Assembly-CSharp/BaldiScript.cs \
+            Assets/Scripts/Assembly-CSharp/AILocationSelectorScript.cs \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          git diff --cached --check
+
+          if ! git diff --cached --quiet; then
+            git commit -m \
+              'Recovery 15: Baldi AI and activation'
+            git push origin HEAD:main
+          fi
+
+          echo 'Recovery 15 complete'
