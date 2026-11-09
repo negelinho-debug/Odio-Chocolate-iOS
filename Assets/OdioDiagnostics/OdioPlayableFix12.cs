@@ -31,6 +31,7 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         new HashSet<int>();
 
     private NavMeshAgent baldiAgent;
+    private BaldiScript recoveryBaldi;
 
     private float nextChase;
     private float nextLog;
@@ -127,6 +128,7 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         nextLog = 0f;
 
         baldiAgent = null;
+        recoveryBaldi = null;
 
         BaldiScript[] enemies =
             FindObjectsOfType<BaldiScript>(true);
@@ -141,6 +143,7 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
 
             baldiAgent =
                 enemy.GetComponent<NavMeshAgent>();
+            recoveryBaldi = enemy;
 
             break;
         }
@@ -186,39 +189,46 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
             );
         }
 
-        if (
-            baldiAgent != null &&
-            baldiAgent.enabled &&
-            baldiAgent.gameObject.activeInHierarchy &&
-            baldiAgent.isOnNavMesh &&
-            Time.unscaledTime - schoolStarted > 30f
-        )
-        {
-            if (Time.unscaledTime > nextChase)
-            {
-                nextChase = Time.unscaledTime + 1f;
-                baldiAgent.speed = 3.2f;
 
-                baldiAgent.SetDestination(
-                    player.position
-                );
-            }
+    // ODIO RECOVERY15: activate inactive Baldi after first chocolate
+    if (recoveryBaldi != null &&
+        collected.Count > 0 &&
+        !recoveryBaldi.gameObject.activeSelf &&
+        Time.unscaledTime - schoolStarted > 18f)
+    {
+        recoveryBaldi.gameObject.SetActive(true);
+        Debug.Log(
+            "ODIO RECOVERY15: enabled Baldi"
+        );
+    }
 
-            if (
-                Vector3.Distance(
-                    baldiAgent.transform.position,
-                    player.position
-                ) < 1.6f
-            )
-            {
-                gameOver = true;
-                ShowNotice("Baldi caught you!");
+    // FIX12 only handles defeat.
+    // BaldiScript handles movement.
+    if (baldiAgent != null &&
+        baldiAgent.enabled &&
+        baldiAgent.gameObject.activeInHierarchy &&
+        baldiAgent.isOnNavMesh &&
+        Time.unscaledTime - schoolStarted > 30f &&
+        Vector3.Distance(
+            baldiAgent.transform.position,
+            player.position
+        ) < 1.6f)
+    {
+        gameOver = true;
 
-                Debug.Log(
-                    "ODIO FIX12: Player caught"
-                );
-            }
-        }
+        PlayerScript ps =
+            player.GetComponent<PlayerScript>();
+
+        if (ps != null)
+            ps.gameOver = true;
+
+        ShowNotice("Baldi caught you!");
+
+        Debug.Log(
+            "ODIO RECOVERY15: player caught"
+        );
+    }
+
     }
 
     private void ShowNotice(string message)
