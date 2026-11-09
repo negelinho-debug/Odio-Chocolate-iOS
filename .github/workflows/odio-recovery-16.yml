@@ -1,0 +1,341 @@
+
+name: Odio Recovery 16 - Chocolate Quiz
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  quiz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Restore playable chocolate questions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Assets/OdioDiagnostics/OdioPlayableFix12.cs')
+          s = path.read_text(encoding='utf-8-sig')
+          marker = 'ODIO RECOVERY16: quiz'
+
+          if marker in s:
+              print('Recovery 16 already installed')
+              raise SystemExit(0)
+
+          required = (
+              'private void OnSceneLoaded(',
+              'private bool TryCollectAimedChocolate()',
+              'private void OnGUI()',
+              'ODIO RECOVERY14: camera-based collection',
+              'ODIO RECOVERY15: enabled Baldi',
+          )
+          for item in required:
+              if item not in s:
+                  raise SystemExit('Missing prerequisite: ' + item)
+
+          field_anchor = '    private int inventoryCount;'
+          assert s.count(field_anchor) == 1
+          fields = '''
+              // ODIO RECOVERY16: quiz state
+              private NotebookScript quizNotebook;
+              private PlayerScript quizPlayer;
+              private bool quizPreviousCutscene;
+              private float quizPreviousTimeScale = 1f;
+              private int quizIndex;
+              private int quizWrong;
+              private int quizLeft;
+              private int quizRight;
+              private int quizOperation;
+              private int quizAnswer;
+              private int[] quizOptions = new int[3];
+          '''
+          s = s.replace(field_anchor, field_anchor + '\n' + fields, 1)
+
+          # Replace FIX14 collection body.
+          start = s.index(
+              '                if (collected.Add(notebook.GetInstanceID()))'
+          )
+          stop = s.index('                return true;', start)
+          before = s[start:stop]
+
+          if ('gc.CollectNotebook()' not in before or
+                  'notebook.gameObject.SetActive(false)' not in before):
+              raise SystemExit('FIX14 collection body changed')
+
+          s = s[:start] + '''                BeginChocolateQuiz(notebook);
+
+          ''' + s[stop:]
+
+          methods_anchor = '    private void Interact()\n    {'
+          assert s.count(methods_anchor) == 1
+
+          quiz_methods = '''
+              // ODIO RECOVERY16: quiz - three mobile-friendly questions
+              private void BeginChocolateQuiz(NotebookScript notebook)
+              {
+                  if (quizNotebook != null || notebook == null)
+                      return;
+
+                  quizNotebook = notebook;
+                  quizIndex = 0;
+                  quizWrong = 0;
+
+                  quizPlayer = player == null ? null
+                      : player.GetComponent<PlayerScript>();
+
+                  if (quizPlayer != null)
+                  {
+                      quizPreviousCutscene = quizPlayer.cameraCutscene;
+                      quizPlayer.cameraCutscene = true;
+                  }
+
+                  quizPreviousTimeScale = Time.timeScale;
+                  Time.timeScale = 0f;
+
+                  NewChocolateQuestion();
+                  Debug.Log("ODIO RECOVERY16: quiz started");
+              }
+
+              private void NewChocolateQuestion()
+              {
+                  quizLeft = UnityEngine.Random.Range(1, 10);
+                  quizRight = UnityEngine.Random.Range(1, 10);
+                  quizOperation = UnityEngine.Random.Range(0, 3);
+
+                  if (quizOperation == 0)
+                      quizAnswer = quizLeft + quizRight;
+                  else if (quizOperation == 1)
+                      quizAnswer = quizLeft - quizRight;
+                  else
+                      quizAnswer = quizLeft * quizRight;
+
+                  quizOptions[0] = quizAnswer;
+                  quizOptions[1] = quizAnswer +
+                      UnityEngine.Random.Range(1, 5);
+                  quizOptions[2] = quizAnswer -
+                      UnityEngine.Random.Range(1, 5);
+
+                  for (int i = 2; i > 0; i--)
+                  {
+                      int j = UnityEngine.Random.Range(0, i + 1);
+                      int tmp = quizOptions[i];
+                      quizOptions[i] = quizOptions[j];
+                      quizOptions[j] = tmp;
+                  }
+              }
+
+              private void AnswerChocolateQuestion(int answer)
+              {
+                  if (quizNotebook == null)
+                      return;
+
+                  if (answer != quizAnswer)
+                      quizWrong++;
+
+                  quizIndex++;
+
+                  if (quizIndex < 3)
+                  {
+                      NewChocolateQuestion();
+                      return;
+                  }
+
+                  NotebookScript completed = quizNotebook;
+                  quizNotebook = null;
+
+                  Time.timeScale = quizPreviousTimeScale;
+
+                  if (quizPlayer != null)
+                      quizPlayer.cameraCutscene = quizPreviousCutscene;
+
+                  quizPlayer = null;
+
+                  if (completed == null ||
+                      !collected.Add(completed.GetInstanceID()))
+                      return;
+
+                  GameControllerScript gc =
+                      FindObjectOfType<GameControllerScript>();
+
+                  if (gc != null)
+                  {
+                      gc.failedNotebooks += quizWrong;
+                      gc.CollectNotebook();
+                  }
+
+                  if (recoveryBaldi != null && quizWrong > 0)
+                      recoveryBaldi.GetAngry(quizWrong * 0.7f);
+
+                  completed.gameObject.SetActive(false);
+
+                  ShowNotice("Chocolate " + collected.Count +
+                      "/" + Goal + " | Wrong: " + quizWrong);
+
+                  Debug.Log("ODIO RECOVERY16: quiz finished; " +
+                      "collected=" + collected.Count +
+                      " wrong=" + quizWrong);
+
+                  if (collected.Count >= Goal)
+                      ShowNotice("All 13! Find an exit!");
+              }
+
+              private void DrawChocolateQuiz(float w, float h)
+              {
+                  int font = (int)Mathf.Clamp(h * 0.064f, 17f, 30f);
+
+                  GUI.skin.label.fontSize = font;
+                  GUI.skin.button.fontSize = font;
+
+                  float px = w * 0.1f;
+                  float py = h * 0.08f;
+                  float pw = w * 0.8f;
+                  float ph = h * 0.84f;
+
+                  GUI.Box(
+                      new Rect(px, py, pw, ph),
+                      "CHOCOLATE QUESTION " + (quizIndex + 1) + "/3"
+                  );
+
+                  string sign = quizOperation == 0 ? "+" :
+                      (quizOperation == 1 ? "-" : "x");
+
+                  GUI.Label(
+                      new Rect(
+                          px + 16f,
+                          py + ph * 0.22f,
+                          pw - 32f,
+                          ph * 0.17f
+                      ),
+                      quizLeft + " " + sign + " " +
+                      quizRight + " = ?"
+                  );
+
+                  for (int i = 0; i < 3; i++)
+                  {
+                      float bw = (pw - 48f) / 3f;
+
+                      Rect r = new Rect(
+                          px + 12f + i * (bw + 12f),
+                          py + ph * 0.51f,
+                          bw,
+                          ph * 0.30f
+                      );
+
+                      if (GUI.Button(
+                          r, quizOptions[i].ToString()
+                      ))
+                      {
+                          AnswerChocolateQuestion(
+                              quizOptions[i]
+                          );
+                          break;
+                      }
+                  }
+              }
+
+          '''
+
+          s = s.replace(
+              methods_anchor,
+              quiz_methods + methods_anchor,
+              1
+          )
+
+          # Show the quiz instead of gameplay controls.
+          gui_start = s.index('    private void OnGUI()')
+          gui_end = s.index(
+              '        float h = Screen.height;',
+              gui_start
+          )
+
+          gui_head = s[gui_start:gui_end]
+
+          if 'if (!inSchool)' not in gui_head:
+              raise SystemExit('FIX12 OnGUI layout changed')
+
+          s = s[:gui_end] + '''        if (quizNotebook != null)
+              {
+                  DrawChocolateQuiz(Screen.width, Screen.height);
+                  return;
+              }
+
+          ''' + s[gui_end:]
+
+          # Restore time and movement when changing scenes.
+          scene_anchor = '        inSchool = false;\n\n        if (scene.name == "School")'
+
+          if scene_anchor not in s:
+              raise SystemExit('Scene reload setup changed')
+
+          scene_patch = (
+              '        if (quizNotebook != null)\n'
+              '        {\n'
+              '            Time.timeScale = quizPreviousTimeScale;\n'
+              '            if (quizPlayer != null)\n'
+              '                quizPlayer.cameraCutscene = quizPreviousCutscene;\n'
+              '            quizNotebook = null;\n'
+              '            quizPlayer = null;\n'
+              '        }\n\n'
+              + scene_anchor
+          )
+
+          s = s.replace(
+              scene_anchor,
+              scene_patch,
+              1
+          )
+
+          assert s.count(
+              'private void BeginChocolateQuiz('
+          ) == 1
+
+          assert s.count(
+              'private void AnswerChocolateQuestion('
+          ) == 1
+
+          assert s.count('gc.CollectNotebook();') == 1
+          assert s.count('BeginChocolateQuiz(notebook);') == 1
+
+          assert 'ODIO RECOVERY14: camera-based collection' in s
+          assert 'ODIO RECOVERY15: enabled Baldi' in s
+          assert 'else if (kind == 3)' in s
+          assert 'else if (kind == 4)' in s
+
+          assert 'notebook.gameObject.SetActive(false)' not in s
+
+          path.write_text(
+              s,
+              encoding='utf-8'
+          )
+
+          print('RECOVERY 16 STATIC CHECKS PASSED')
+          print('Unity compilation/gameplay NOT tested')
+          PY
+
+      - name: Save restored code
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+
+          sed -i 's/[[:blank:]]*$//' \
+            Assets/OdioDiagnostics/OdioPlayableFix12.cs
+
+          git add Assets/OdioDiagnostics/OdioPlayableFix12.cs
+          git diff --cached --check
+
+          if ! git diff --cached --quiet; then
+            git commit -m 'Recovery 16: playable chocolate questions'
+            git push origin HEAD:main
+          fi
+
+          echo 'Recovery 16 completed'
