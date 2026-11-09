@@ -1,0 +1,51 @@
+
+name: Odio - Remove Wrong Chocolate Quiz
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore-original-collection:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Undo Recovery 16
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git revert --no-edit \
+            69b2f63c828dfbfe22a97a8922753f71a6ce295f
+
+      - name: Verify chocolate collection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "Assets/OdioDiagnostics/OdioPlayableFix12.cs"
+          )
+          s = p.read_text(encoding="utf-8")
+
+          assert "ODIO RECOVERY16" not in s
+          assert "TryCollectAimedChocolate()" in s
+          assert "ODIO RECOVERY15" in s
+          assert "gc.CollectNotebook();" in s
+
+          print("✅ Mathematical quiz removed")
+          print("✅ Chocolate collection preserved")
+          print("✅ Baldi recovery preserved")
+          PY
+
+      - name: Save correction
+        run: |
+          git push origin HEAD:main
