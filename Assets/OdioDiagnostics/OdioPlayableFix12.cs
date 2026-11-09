@@ -229,37 +229,102 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
         Debug.Log("ODIO FIX12: " + message);
     }
 
+
+    // ODIO RECOVERY14: camera-based collection
+    private bool TryCollectAimedChocolate()
+    {
+        if (viewCamera == null)
+            viewCamera = Camera.main;
+
+        if (viewCamera == null || player == null)
+            return false;
+
+        Ray ray = viewCamera.ViewportPointToRay(
+            new Vector3(0.5f, 0.5f, 0f));
+
+        RaycastHit[] hits = Physics.RaycastAll(
+            ray, 12f, ~0,
+            QueryTriggerInteraction.Collide);
+
+        Array.Sort(hits, (a, b) =>
+            a.distance.CompareTo(b.distance));
+
+        foreach (RaycastHit hit in hits)
+        {
+            Collider c = hit.collider;
+            if (c == null) continue;
+
+            if (c.transform.IsChildOf(player))
+                continue;
+
+            NotebookScript notebook =
+                c.GetComponentInParent<NotebookScript>();
+
+            if (notebook != null)
+            {
+                if (!notebook.gameObject.activeInHierarchy ||
+                    collected.Contains(notebook.GetInstanceID()))
+                    return false;
+
+                float reach = notebook.openingDistance > 0f
+                    ? notebook.openingDistance : 10f;
+
+                if (hit.distance > reach ||
+                    Vector3.Distance(
+                        player.position,
+                        notebook.transform.position
+                    ) > reach + 1.5f)
+                {
+                    ShowNotice("Move closer to the chocolate");
+                    return true;
+                }
+
+                if (collected.Add(notebook.GetInstanceID()))
+                {
+                    GameControllerScript gc =
+                        FindObjectOfType<GameControllerScript>();
+
+                    if (gc != null)
+                        gc.CollectNotebook();
+
+                    notebook.gameObject.SetActive(false);
+
+                    ShowNotice(
+                        "Chocolate " +
+                        collected.Count + "/" + Goal
+                    );
+
+                    if (collected.Count >= Goal)
+                        ShowNotice("All 13! Find an exit!");
+
+                    Debug.Log(
+                        "ODIO RECOVERY14: collected=" +
+                        notebook.name +
+                        " total=" + collected.Count
+                    );
+                }
+
+                return true;
+            }
+
+            if (!c.isTrigger)
+                break;
+        }
+
+        return false;
+    }
+
     private void Interact()
     {
         if (player == null || gameOver)
             return;
 
+        if (TryCollectAimedChocolate()) return;
+
         float minDistance = 3.1f;
         int kind = 0;
 
         MonoBehaviour nearest = null;
-
-        foreach (NotebookScript n in notebooks)
-        {
-            if (
-                n == null ||
-                !n.gameObject.activeInHierarchy ||
-                collected.Contains(n.GetInstanceID())
-            )
-                continue;
-
-            float d = Vector3.Distance(
-                player.position,
-                n.transform.position
-            );
-
-            if (d < minDistance)
-            {
-                minDistance = d;
-                nearest = n;
-                kind = 1;
-            }
-        }
 
         foreach (PickupScript p in pickups)
         {
@@ -333,30 +398,7 @@ public sealed class OdioPlayableFix12 : MonoBehaviour
             return;
         }
 
-        if (kind == 1)
-        {
-            collected.Add(
-                nearest.GetInstanceID()
-            );
-
-                      // ODIO RECOVERY13: synchronized notebook counter.
-                      GameControllerScript controller =
-                          FindObjectOfType<GameControllerScript>();
-                      if (controller != null) controller.CollectNotebook();
-
-            nearest.gameObject.SetActive(false);
-
-            ShowNotice(
-                "Collected: " +
-                collected.Count + "/" + Goal
-            );
-
-            if (collected.Count >= Goal)
-                ShowNotice(
-                    "All 13 collected! Find an exit!"
-                );
-        }
-        else if (kind == 2)
+        if (kind == 2)
         {
             if (inventoryCount >= 3)
             {
