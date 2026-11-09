@@ -1,0 +1,368 @@
+
+name: Odio Recovery 18 - Core Game Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CSharp syntax checker
+        run: |
+          python3 -m pip install --quiet \
+            tree-sitter==0.25.2 \
+            tree-sitter-c-sharp==0.23.5
+
+      - name: Audit game without changing files
+        shell: bash
+        run: |
+          mkdir -p reports
+          python3 - <<'PY'
+          from pathlib import Path
+          from tree_sitter import Language, Parser
+          import tree_sitter_c_sharp
+          import re
+
+          root = Path('Assets')
+          scripts = root / 'Scripts/Assembly-CSharp'
+          foundation = root / 'OdioDiagnostics/OdioPlayableFix12.cs'
+          scene = root / 'Scene/School.unity'
+
+          errors = []
+          warnings = []
+          passed = []
+
+          def check(ok, message):
+              if ok:
+                  passed.append(message)
+              else:
+                  errors.append(message)
+
+          required = {
+              'StartButton.cs': [
+                  'PlayerPrefs.SetString(',
+                  'SceneManager.LoadScene('
+              ],
+              'GameControllerScript.cs': [
+                  'void CollectNotebook()',
+                  'notebooks++;',
+                  'notebooks == 13',
+                  'ActivateFinaleMode()',
+                  'void ExitReached()'
+              ],
+              'PlayerScript.cs': [
+                  'void PlayerMove()',
+                  'void MouseMove()'
+              ],
+              'BaldiScript.cs': [
+                  'void TargetPlayer()',
+                  'agent.SetDestination(player.position)'
+              ],
+              'EntranceScript.cs': [
+                  'void Raise()',
+                  'void Lower()'
+              ],
+              'NearExitTriggerScript.cs': [
+                  'void OnTriggerEnter(Collider other)',
+                  'gc.ExitReached()'
+              ],
+              'ExitTriggerScript.cs': [
+                  'void OnTriggerEnter(Collider other)',
+                  'SceneManager.LoadScene(target)'
+              ]
+          }
+
+          for name, tokens in required.items():
+              path = scripts / name
+
+              check(
+                  path.is_file(),
+                  'Script exists: ' + name
+              )
+
+              if path.is_file():
+                  body = path.read_text(
+                      encoding='utf-8-sig',
+                      errors='replace'
+                  )
+
+                  for token in tokens:
+                      check(
+                          token in body,
+                          name + ' contains ' + token
+                      )
+
+          check(
+              foundation.is_file(),
+              'Foundation exists'
+          )
+
+          if foundation.is_file():
+              body = foundation.read_text(
+                  encoding='utf-8-sig'
+              )
+
+              for token in (
+                  'ODIO RECOVERY14',
+                  'ODIO RECOVERY15',
+                  'TryCollectAimedChocolate()',
+                  'gc.CollectNotebook();',
+                  'baldiAgent.isOnNavMesh',
+                  'ODIO RECOVERY17 ORIGINAL: exit via scene trigger'
+              ):
+                  check(
+                      token in body,
+                      'Foundation contains ' + token
+                  )
+
+              check(
+                  'ODIO RECOVERY16' not in body,
+                  'Incorrect mathematics quiz is absent'
+              )
+
+              check(
+                  'Prototype level completed' not in body,
+                  'Prototype instant-win removed'
+              )
+
+          build = Path(
+              'ProjectSettings/EditorBuildSettings.asset'
+          )
+
+          check(
+              build.is_file(),
+              'Unity build scene list exists'
+          )
+
+          build_text = (
+              build.read_text(errors='replace')
+              if build.exists() else ''
+          )
+
+          paths = re.findall(
+              r'(?m)^\s*path:\s*(Assets/Scene/[^\s]+\.unity)',
+              build_text
+          )
+
+          for name in (
+              'MainMenu',
+              'School',
+              'GameOver',
+              'Results',
+              'Secret'
+          ):
+              loc = 'Assets/Scene/' + name + '.unity'
+
+              check(
+                  loc in paths and Path(loc).is_file(),
+                  'Scene included in build: ' + name
+              )
+
+          check(
+              scene.exists() and
+              scene.stat().st_size > 1000,
+              'School scene data exists'
+          )
+
+          if scene.exists():
+              school = scene.read_text(
+                  encoding='utf-8-sig',
+                  errors='replace'
+              )
+
+              chocolates = school.count(
+                  'openingDistance: 10'
+              )
+
+              if chocolates < 13:
+                  warnings.append(
+                      'School has only ' +
+                      str(chocolates) +
+                      ' expected chocolate-distance objects'
+                  )
+              else:
+                  passed.append(
+                      'Chocolate objects: ' + str(chocolates)
+                  )
+
+              for name, expected in (
+                  ('NotebookScript', 13),
+                  ('NearExitTriggerScript', 4),
+                  ('ExitTriggerScript', 4)
+              ):
+                  meta = scripts / (name + '.cs.meta')
+
+                  if not meta.exists():
+                      warnings.append(
+                          'Missing metadata: ' + str(meta)
+                      )
+                      continue
+
+                  found = re.search(
+                      r'guid:\s*([0-9a-f]{32})',
+                      meta.read_text(errors='replace')
+                  )
+
+                  if not found:
+                      warnings.append(
+                          'Missing GUID: ' + str(meta)
+                      )
+                      continue
+
+                  count = len(re.findall(
+                      r'm_Script:\s*\{[^}]*guid:\s*' +
+                      found.group(1),
+                      school
+                  ))
+
+                  if count != expected:
+                      warnings.append(
+                          name + ': ' + str(count) +
+                          ' references; expected ' +
+                          str(expected)
+                      )
+                  else:
+                      passed.append(
+                          name + ' links: ' + str(count)
+                      )
+
+              missing = len(re.findall(
+                  r'm_Script:\s*\{\s*fileID:\s*0\s*\}',
+                  school
+              ))
+
+              if missing:
+                  errors.append(
+                      'Missing MonoBehaviour script links: ' +
+                      str(missing)
+                  )
+              else:
+                  passed.append(
+                      'No explicit null script links'
+                  )
+
+              if 'm_NavMeshData:' not in school:
+                  warnings.append(
+                      'NavMesh not apparent: test Baldi pathfinding'
+                  )
+
+          cs_files = list(root.rglob('*.cs'))
+
+          check(
+              bool(cs_files),
+              'CSharp files discovered'
+          )
+
+          parser = Parser(
+              Language(tree_sitter_c_sharp.language())
+          )
+
+          bad = []
+
+          for path in cs_files:
+              tree = parser.parse(path.read_bytes())
+
+              if tree.root_node.has_error:
+                  bad.append(str(path))
+
+          for path in bad[:30]:
+              errors.append(
+                  'CSharp syntax error: ' + path
+              )
+
+          if len(bad) > 30:
+              errors.append(
+                  'Additional syntax-error files: ' +
+                  str(len(bad) - 30)
+              )
+
+          if not bad:
+              passed.append(
+                  'Parsed CSharp files: ' +
+                  str(len(cs_files))
+              )
+
+          empty = sum(
+              len(re.findall(
+                  r'\)\s*\{\s*(?:return\s+null;\s*)?\}',
+                  p.read_text(
+                      encoding='utf-8-sig',
+                      errors='replace'
+                  )
+              ))
+              for p in scripts.glob('*.cs')
+          )
+
+          warnings.append(
+              str(empty) +
+              ' potentially empty methods still remain'
+          )
+
+          warnings.append(
+              'Unity compilation and iPhone gameplay NOT tested'
+          )
+
+          lines = [
+              '# ODIO RECOVERY 18 REPORT',
+              '',
+              'This audit does not build an IPA.',
+              '',
+              '## Blocking problems: ' + str(len(errors)),
+              ''
+          ]
+
+          lines += (
+              ['- ' + x for x in errors]
+              or ['- None detected']
+          )
+
+          lines += [
+              '',
+              '## Warnings: ' + str(len(warnings)),
+              ''
+          ]
+
+          lines += ['- ' + x for x in warnings]
+
+          lines += [
+              '',
+              '## Passed checks: ' + str(len(passed)),
+              ''
+          ]
+
+          lines += ['- ' + x for x in passed]
+
+          report = '\n'.join(lines) + '\n'
+
+          Path(
+              'reports/odio-recovery-18.md'
+          ).write_text(report, encoding='utf-8')
+
+          print(report)
+
+          if errors:
+              raise SystemExit(
+                  'PREFLIGHT FAILED: fix blocking problems'
+              )
+
+          print(
+              'PREFLIGHT PASSED: Unity compilation still required'
+          )
+          PY
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Odio-Recovery18-Report
+          path: reports/odio-recovery-18.md
+          if-no-files-found: warn
+          retention-days: 14
